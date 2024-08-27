@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="C:\Users\Dell 5290\Documents\cribs-and-ladders\ScoreTreeTry2\main.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\Dell 5290\Documents\cribs-and-ladders\ScoreTreeTry2\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{E4282DBE-798A-3452-A8E3-8B1FF674FF3E}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

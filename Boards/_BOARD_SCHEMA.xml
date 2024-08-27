@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+  <xs:element name="cribladderboard">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="boardname" type="xs:string"/>
+        <xs:element name="track" maxOccurs="unbounded">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="tracknum" type="xs:int"/>
+              <xs:element name="length" type="xs:int"/>
+              <xs:element name="twodecklength" type="xs:int"/>
+              <xs:element name="ladders">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="ladder" maxOccurs="unbounded">
+                      <xs:complexType>
+                        <xs:sequence>
+                          <xs:element name="start" type="xs:int"/>
+                          <xs:element name="end" type="xs:int"/>
+                        </xs:sequence>
+                      </xs:complexType>
+                    </xs:element>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+              <xs:element name="chutes">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="chute" maxOccurs="unbounded">
+                      <xs:complexType>
+                        <xs:sequence>
+                          <xs:element name="start" type="xs:int"/>
+                          <xs:element name="end" type="xs:int"/>
+                        </xs:sequence>
+                      </xs:complexType>
+                    </xs:element>
+                  </xs:sequence>
+     

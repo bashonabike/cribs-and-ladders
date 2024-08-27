@@ -1,0 +1,26 @@
+[LightGBM] [Info] Auto-choosing row-wise multi-threading, the overhead of testing was 0.000050 seconds.
+You can set `force_row_wise=true` to remove the overhead.
+And if memory is not enough, you can set `force_col_wise=true`.
+[LightGBM] [Info] Total Bins 510
+[LightGBM] [Info] Number of data points in the train set: 1379, number of used features: 2
+[LightGBM] [Info] Start training from score 27.572154
+[LightGBM] [Info] Auto-choosing col-wise multi-threading, the overhead of testing was 0.000034 seconds.
+You can set `force_col_wise=true` to remove the overhead.
+[LightGBM] [Info] Total Bins 510
+[LightGBM] [Info] Number of data points in the train set: 1379, number of used features: 2
+[LightGBM] [Info] Start training from score 27.470631
+[LightGBM] [Info] Auto-choosing col-wise multi-threading, the overhead of testing was 0.000035 seconds.
+You can set `force_col_wise=true` to remove the overhead.
+[LightGBM] [Info] Total Bins 510
+[LightGBM] [Info] Number of data points in the train set: 1379, number of used features: 2
+[LightGBM] [Info] Start training from score 27.456853
+Backend tkagg is interactive backend. Turning interactive mode on.
+Traceback (most recent call last):
+  File "C:\Users\Dell 5290\Documents\cribs-and-ladders\cribbage_main.py", line 157, in <module>
+    microRegressionsUsingInputOutputPairings()
+  File "C:\Users\Dell 5290\Documents\cribs-and-ladders\cribbage_main.py", line 137, in microRegressionsUsingInputOutputPairings
+    optimizer.testGBMOnPairings(["gamelength", "balance"], "ladderscanstartat")
+  File "C:\Users\Dell 5290\Documents\cribs-and-ladders\cribsandladders\Optimizer.py", line 179, in testGBMOnPairings
+    sum_squared_diff = mean_squared_error(y_test, y_pred)
+                       ^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt

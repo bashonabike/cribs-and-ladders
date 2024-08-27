@@ -1,0 +1,19 @@
+# CMake generation dependency list for this directory.
+C:/Users/Dell 5290/AppData/Local/Temp/pip-build-env-yfu7jljc/overlay/Lib/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeCheckCompilerFlagCommonPatterns.cmake
+C:/Users/Dell 5290/AppData/Local/Temp/pip-build-env-yfu7jljc/overlay/Lib/site-packages/cmake/data/share/cmake-3.30/Modules/CMakeDependentOption.cmake
+C:/Users/Dell 5290/AppData/Local/Temp/pip-build-env-yfu7jljc/overlay/Lib/site-packages/cmake/data/share/cmake-3.30/Modules/CMakePackageConfigHelpers.cmake
+C:/Users/Dell 5290/AppData/Local/Temp/pip-build-env-yfu7jljc/overlay/Lib/site-packages/cmake/data/share/cmake-3.30/Modules/CheckCXXCompilerFlag.cmake
+C:/Users/Dell 5290/AppData/Local/Temp/pip-build-env-yfu7jljc/overlay/Lib/site-packages/cmake/data/share/cmake-3.30/Modules/CheckCXXSourceCompiles.cmake
+C:/Users/Dell 5290/AppData/Local/Temp/pip-build-env-yfu7jljc/overlay/Lib/site-packages/cmake/data/share/cmake-3.30/Modules/FindPackageHandleStandardArgs.cmake
+C:/Users/Dell 5290/AppData/Local/Temp/pip-build-env-yfu7jljc/overlay/Lib/site-packages/cmake/data/share/cmake-3.30/Modules/FindPackageMessage.cmake
+C:/Users/Dell 5290/AppData/Local/Temp/pip-build-env-yfu7jljc/overlay/Lib/site-packages/cmake/data/share/cmake-3.30/Modules/FindPythonInterp.cmake
+C:/Users/Dell 5290/AppData/Local/Temp/pip-build-env-yfu7jljc/overlay/Lib/site-packages/cmake/data/share/cmake-3.30/Modules/GNUInstallDirs.cmake
+C:/Users/Dell 5290/AppData/Local/Temp/pip-build-env-yfu7jljc/overlay/Lib/site-packages/cmake/data/share/cmake-3.30/Modules/Internal/CheckCompilerFlag.cmake
+C:/Users/Dell 5290/AppData/Local/Temp/pip-build-env-yfu7jljc/overlay/Lib/site-packages/cmake/data/share/cmake-3.30/Modules/Internal/CheckFlagCommonConfig.cmake
+C:/Users/Dell 5290/AppData/Local/Temp/pip-build-env-yfu7jljc/overlay/Lib/site-packages/cmake/data/share/cmake-3.30/Modules/Internal/CheckSourceCompiles.cmake
+C:/Users/Dell 5290/AppData/Local/Temp/pip-build-env-yfu7jljc/overlay/Lib/site-packages/cmake/data/share/cmake-3.30/Modules/WriteBasicConfigVersionFile.cmake
+C:/Users/Dell 5290/Documents/cribs-and-ladders/ScoreTreeTry2/pybind11/CMakeLists.txt
+C:/Users/Dell 5290/Documents/cribs-and-ladders/ScoreTreeTry2/pybind11/tools/FindPythonLibsNew.cmake
+C:/Users/Dell 5290/Documents/cribs-and-ladders/ScoreTreeTry2/pybind11/tools/JoinPaths.cmake
+C:/Users/Dell 5290/Documents/cribs-and-ladders/ScoreTreeTry2/pybind11/tools/pybind11Common.cmake
+C:/Users/Dell 5290/Documents/cribs-and-ladders/ScoreTreeTry2/pybind11/tools/pybind11Tools.cmake

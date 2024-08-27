@@ -1,0 +1,436 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="74.020836mm"
+   height="108.3532mm"
+   viewBox="0 0 74.020836 108.3532"
+   version="1.1"
+   id="svg1"
+   inkscape:version="1.3.1 (91b66b0783, 2023-11-16)"
+   sodipodi:docname="Simple SVG Test.svg"
+   inkscape:export-filename="SimpleSVG\Track2.svg"
+   inkscape:export-xdpi="96"
+   inkscape:export-ydpi="96"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="mm"
+     inkscape:zoom="0.7670244"
+     inkscape:cx="518.23645"
+     inkscape:cy="323.97926"
+     inkscape:window-width="1920"
+     inkscape:window-height="1057"
+     inkscape:window-x="1912"
+     inkscape:window-y="-8"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="layer1"
+     showgrid="false" />
+  <defs
+     id="defs1">
+    <inkscape:path-effect
+       effect="ruler"
+       id="path-effect287"
+       is_visible="true"
+       lpeversion="1"
+       unit="mm"
+       mark_distance="5"
+       mark_length="0"
+       minor_mark_length="1"
+       major_mark_steps="1000"
+       shift="0"
+       offset="0"
+       mark_dir="left"
+       border_marks="both" />
+    <inkscape:path-effect
+       effect="ruler"
+       id="path-effect285"
+       is_visible="true"
+       lpeversion="1"
+       unit="mm"
+       mark_distance="5"
+       mark_length="0"
+       minor_mark_length="1"
+       major_mark_steps="1000"
+       shift="0"
+       offset="0"
+       mark_dir="left"
+       border_marks="both" />
+    <inkscape:path-effect
+       effect="ruler"
+       id="path-effect283"
+       is_visible="true"
+       lpeversion="1"
+       unit="mm"
+       mark_distance="5"
+       mark_length="0"
+       minor_mark_length="1"
+       major_mark_steps="1000"
+       shift="0"
+       offset="0"
+       mark_dir="left"
+       border_marks="both" />
+    <inkscape:path-effect
+       effect="ruler"
+       id="path-effect281"
+       is_visible="true"
+       lpeversion="1"
+       unit="mm"
+       mark_distance="5"
+       mark_length="0"
+       minor_mark_length="1"
+       major_mark_steps="1000"
+       shift="0"
+       offset="0"
+       mark_dir="left"
+       border_marks="both" />
+    <inkscape:path-effect
+       effect="ruler"
+       id="path-effect279"
+       is_visible="true"
+       lpeversion="1"
+       unit="mm"
+       mark_distance="5"
+       mark_length="0"
+       minor_mark_length="1"
+       major_mark_steps="1000"
+       shift="0"
+       offset="0"
+       mark_dir="left"
+       border_marks="both" />
+    <inkscape:path-effect
+       effect="ruler"
+       id="path-effect277"
+       is_visible="true"
+       lpeversion="1"
+       unit="mm"
+       mark_distance="5"
+       mark_length="0"
+       minor_mark_length="1"
+       major_mark_steps="1000"
+       shift="0"
+       offset="0"
+       mark_dir="left"
+       border_marks="both" />
+    <inkscape:path-effect
+       effect="ruler"
+       id="path-effect275"
+       is_visible="true"
+       lpeversion="1"
+       unit="mm"
+       mark_distance="5"
+       mark_length="0"
+       minor_mark_length="1"
+       major_mark_steps="1000"
+       shift="0"
+       offset="0"
+       mark_dir="left"
+       border_marks="both" />
+    <inkscape:path-effect
+       effect="ruler"
+       id="path-effect273"
+       is_visible="true"
+       lpeversion="1"
+       unit="mm"
+       mark_distance="5"
+       mark_length="0"
+       minor_mark_length="1"
+       major_mark_steps="1000"
+       shift="0"
+       offset="0"
+       mark_dir="left"
+       border_marks="both" />
+    <inkscape:path-effect
+       effect="ruler"
+       id="path-effect271"
+       is_visible="true"
+       lpeversion="1"
+       unit="mm"
+       mark_distance="5"
+       mark_length="0"
+       minor_mark_length="1"
+       major_mark_steps="1000"
+       shift="0"
+       offset="0"
+       mark_dir="left"
+       border_marks="both" />
+    <inkscape:path-effect
+       effect="ruler"
+       id="path-effect269"
+       is_visible="true"
+       lpeversion="1"
+       unit="mm"
+       mark_distance="5"
+       mark_length="0"
+       minor_mark_length="1"
+       major_mark_steps="1000"
+       shift="0"
+       offset="0"
+       mark_dir="left"
+       border_marks="both" />
+    <inkscape:path-effect
+       effect="ruler"
+       id="path-effect267"
+       is_visible="true"
+       lpeversion="1"
+       unit="mm"
+       mark_distance="5"
+       mark_length="0"
+       minor_mark_length="1"
+       major_mark_steps="1000"
+       shift="0"
+       offset="0"
+       mark_dir="left"
+       border_marks="both" />
+    <inkscape:path-effect
+       effect="ruler"
+       id="path-effect265"
+       is_visible="true"
+       lpeversion="1"
+       unit="mm"
+       mark_distance="5"
+       mark_length="0"
+       minor_mark_length="1"
+       major_mark_steps="1000"
+       shift="0"
+       offset="0"
+       mark_dir="left"
+       border_marks="both" />
+    <inkscape:path-effect
+       effect="ruler"
+       id="path-effect263"
+       is_visible="true"
+       lpeversion="1"
+       unit="mm"
+       mark_distance="5"
+       mark_length="0"
+       minor_mark_length="1"
+       major_mark_steps="1000"
+       shift="0"
+       offset="0"
+       mark_dir="left"
+       border_marks="both" />
+    <inkscape:path-effect
+       effect="ruler"
+       id="path-effect261"
+       is_visible="true"
+       lpeversion="1"
+       unit="mm"
+       mark_distance="5"
+       mark_length="0"
+       minor_mark_length="1"
+       major_mark_steps="1000"
+       shift="0"
+       offset="0"
+       mark_dir="left"
+       border_marks="both" />
+    <inkscape:path-effect
+       effect="ruler"
+       id="path-effect259"
+       is_visible="true"
+       lpeversion="1"
+       unit="mm"
+       mark_distance="5"
+       mark_length="0"
+       minor_mark_length="1"
+       major_mark_steps="1000"
+       shift="0"
+       offset="0"
+       mark_dir="left"
+       border_marks="both" />
+    <inkscape:path-effect
+       effect="ruler"
+       id="path-effect257"
+       is_visible="true"
+       lpeversion="1"
+       unit="mm"
+       mark_distance="5"
+       mark_length="0"
+       minor_mark_length="1"
+       major_mark_steps="1000"
+       shift="0"
+       offset="0"
+       mark_dir="left"
+       border_marks="both" />
+    <inkscape:path-effect
+       effect="ruler"
+       id="path-effect255"
+       is_visible="true"
+       lpeversion="1"
+       unit="mm"
+       mark_distance="5"
+       mark_length="0"
+       minor_mark_length="1"
+       major_mark_steps="1000"
+       shift="0"
+       offset="0"
+       mark_dir="left"
+       border_marks="both" />
+    <inkscape:path-effect
+       effect="ruler"
+       id="path-effect253"
+       is_visible="true"
+       lpeversion="1"
+       unit="mm"
+       mark_distance="5"
+       mark_length="0"
+       minor_mark_length="1"
+       major_mark_steps="1000"
+       shift="0"
+       offset="0"
+       mark_dir="left"
+       border_marks="both" />
+    <inkscape:path-effect
+       effect="ruler"
+       id="path-effect251"
+       is_visible="true"
+       lpeversion="1"
+       unit="mm"
+       mark_distance="5"
+       mark_length="0"
+       minor_mark_length="1"
+       major_mark_steps="1000"
+       shift="0"
+       offset="0"
+       mark_dir="left"
+       border_marks="both" />
+  </defs>
+  <g
+     inkscape:groupmode="layer"
+     id="g4"
+     inkscape:label="Track3_HOLES"
+     inkscape:export-filename="g4.svg"
+     inkscape:export-xdpi="96"
+     inkscape:export-ydpi="96"
+     style="display:inline"
+     transform="translate(-8.3707866,-61.783211)">
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1.565"
+       d="m 70.221211,65.770895 0.03029,-0.262843 m -0.03029,0.262843 z m 0.03029,-0.262843 z"
+       id="path285"
+       inkscape:original-d="m 70.221211,65.770895 0.03029,-0.262843"
+       inkscape:path-effect="#path-effect287" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1.565"
+       d="m 64.964348,65.165019 0.03029,-0.262843 m -0.03029,0.262843 z m 0.03029,-0.262843 z"
+       id="path283"
+       inkscape:original-d="m 64.964348,65.165019 0.03029,-0.262843"
+       inkscape:path-effect="#path-effect285" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1.565"
+       d="m 59.707485,64.559143 0.03029,-0.262843 m -0.03029,0.262843 z m 0.03029,-0.262843 z"
+       id="path281"
+       inkscape:original-d="M 59.707485,64.559143 59.737775,64.2963"
+       inkscape:path-effect="#path-effect283" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1.565"
+       d="m 54.450622,63.953267 0.03029,-0.262844 m -0.03029,0.262844 z m 0.03029,-0.262844 z"
+       id="path279"
+       inkscape:original-d="m 54.450622,63.953267 0.03029,-0.262844"
+       inkscape:path-effect="#path-effect281" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1.565"
+       d="m 49.193759,63.347391 0.03029,-0.262844 m -0.03029,0.262844 z m 0.03029,-0.262844 z"
+       id="path277"
+       inkscape:original-d="m 49.193759,63.347391 0.03029,-0.262844"
+       inkscape:path-effect="#path-effect279" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1.565"
+       d="m 43.936896,62.741515 0.03029,-0.262844 m -0.03029,0.262844 z m 0.03029,-0.262844 z"
+       id="path275"
+       inkscape:original-d="m 43.936896,62.741515 0.03029,-0.262844"
+       inkscape:path-effect="#path-effect277" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1.565"
+       d="m 38.680033,62.135638 0.03029,-0.262843 m -0.03029,0.262843 z m 0.03029,-0.262843 z"
+       id="path273"
+       inkscape:original-d="m 38.680033,62.135638 0.03029,-0.262843"
+       inkscape:path-effect="#path-effect275" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1.565"
+       d="m 36.013377,66.428039 -0.234291,-0.122931 m 0.234291,0.122931 z m -0.234291,-0.122931 z"
+       id="path271"
+       inkscape:original-d="M 36.013377,66.428039 35.779086,66.305108"
+       inkscape:path-effect="#path-effect273" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1.565"
+       d="m 33.554765,71.113864 -0.234291,-0.12293 m 0.234291,0.12293 z m -0.234291,-0.12293 z"
+       id="path269"
+       inkscape:original-d="m 33.554765,71.113864 -0.234291,-0.12293"
+       inkscape:path-effect="#path-effect271" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1.565"
+       d="m 31.096153,75.79969 -0.234292,-0.122931 m 0.234292,0.122931 z m -0.234292,-0.122931 z"
+       id="path267"
+       inkscape:original-d="M 31.096153,75.79969 30.861861,75.676759"
+       inkscape:path-effect="#path-effect269" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1.565"
+       d="m 28.63754,80.485516 -0.234291,-0.122931 m 0.234291,0.122931 z m -0.234291,-0.122931 z"
+       id="path265"
+       inkscape:original-d="M 28.63754,80.485516 28.403249,80.362585"
+       inkscape:path-effect="#path-effect267" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1.565"
+       d="M 26.178928,85.171341 25.944636,85.04841 m 0.234292,0.122931 z M 25.944636,85.04841 Z"
+       id="path263"
+       inkscape:original-d="M 26.178928,85.171341 25.944636,85.04841"
+       inkscape:path-effect="#path-effect265" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1.565"
+       d="m 23.720315,89.857167 -0.234291,-0.122931 m 0.234291,0.122931 z m -0.234291,-0.122931 z"
+       id="path261"
+       inkscape:original-d="M 23.720315,89.857167 23.486024,89.734236"
+       inkscape:path-effect="#path-effect263" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1.565"
+       d="m 21.261703,94.542992 -0.234291,-0.12293 m 0.234291,0.12293 z m -0.234291,-0.12293 z"
+       id="path259"
+       inkscape:original-d="m 21.261703,94.542992 -0.234291,-0.12293"
+       inkscape:path-effect="#path-effect261" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1.565"
+       d="m 18.803091,99.228818 -0.234292,-0.122931 m 0.234292,0.122931 z m -0.234292,-0.122931 z"
+       id="path257"
+       inkscape:original-d="M 18.803091,99.228818 18.568799,99.105887"
+       inkscape:path-effect="#path-effect259" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1.565"
+       d="m 16.344478,103.91464 -0.234291,-0.12293 m 0.234291,0.12293 z m -0.234291,-0.12293 z"
+       id="path255"
+       inkscape:original-d="m 16.344478,103.91464 -0.234291,-0.12293"
+       inkscape:path-effect="#path-effect257" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1.565"
+       d="m 13.885866,108.60047 -0.234292,-0.12293 m 0.234292,0.12293 z m -0.234292,-0.12293 z"
+       id="path253"
+       inkscape:original-d="m 13.885866,108.60047 -0.234292,-0.12293"
+       inkscape:path-effect="#path-effect255" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1.565"
+       d="m 11.427253,113.28629 -0.234291,-0.12293 m 0.234291,0.12293 z m -0.234291,-0.12293 z"
+       id="path251"
+       inkscape:original-d="m 11.427253,113.28629 -0.234291,-0.12293"
+       inkscape:path-effect="#path-effect253" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1.565"
+       d="m 8.9686409,117.97212 -0.2342913,-0.12293 m 0.2342913,0.12293 z m -0.2342913,-0.12293 z"
+       id="path250"
+       inkscape:original-d="M 8.9686409,117.97212 8.7343496,117.84919"
+       inkscape:path-effect="#path-effect251"
+       inkscape:label="path250"
+       inkscape:export-filename="TestSVG\path250.svg"
+       inkscape:export-xdpi="96"
+       inkscape:export-ydpi="96" />
+  </g>
+</svg>

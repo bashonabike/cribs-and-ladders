@@ -1,0 +1,20 @@
+<cribladderboard>
+    <boardname>"TEMPLATE"</boardname>
+	<track>
+		<tracknum>0</tracknum>
+		<length>99999</length>
+		<twodecklength>99999</twodecklength>
+		<ladders>
+			<ladder>
+				<start>0</start>
+				<end>0</end>
+			</ladder>
+		</ladders>
+		<chutes>
+			<chute>
+				<start>0</start>
+				<end>0</end>
+			</chute>
+		</chutes>
+	</track>
+</cribladderboard>

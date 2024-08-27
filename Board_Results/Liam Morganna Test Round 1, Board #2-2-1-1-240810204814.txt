@@ -1,0 +1,6 @@
+	Liam Morganna Test Round 1, Board #2
+Lengths	64/64
+# trials	1
+# decks	1
+# players	2
+balance (<5% reasonable for traditional board, for comparison) 	50.00% (Player 1), -50.00% (Player 2)

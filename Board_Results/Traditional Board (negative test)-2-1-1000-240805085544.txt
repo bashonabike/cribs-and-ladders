@@ -1,0 +1,17 @@
+	Traditional Board (negative test)
+Length	120
+# trials	1000
+# decks	1
+# players	2
+balance (<5% reasonable for traditional board, for comparison) 	0.00% towards Player A
+So excites (pegging)	0
+Boring repeats	0
+Snakes/Ladders	0
+Snakes/Ladders in 1 incr	0
+Snakes/Ladders in 2 incrs	0
+# rounds	9.359
+Likelihood So excites (pegging) per round	0.00%
+Likelihood Boring repeats per round	0.00%
+Likelihood Snakes/Ladders per round	0.00%
+Likelihood Snakes/Ladders in 1 incr per round	0.00%
+Likelihood Snakes/Ladders in 2 incrs per round	0.00%

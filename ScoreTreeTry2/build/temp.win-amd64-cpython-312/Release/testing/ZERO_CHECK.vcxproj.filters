@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\Dell 5290\Documents\cribs-and-ladders\ScoreTreeTry2\build\temp.win-amd64-cpython-312\Release\testing\CMakeFiles\7654e126700c04d9aae26b7dcecf7e54\generate.stamp.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{2A16E16B-38B9-3278-BD39-59C6D3A71A62}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

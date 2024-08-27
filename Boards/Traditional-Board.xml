@@ -1,0 +1,13 @@
+<cribladderboard>
+    <boardname>"Traditional Board (negative test)"</boardname>
+	<track>
+		<tracknum>0</tracknum>
+    <length>120</length>
+    <ladders>
+
+    </ladders>
+    <chutes>
+
+    </chutes>
+	</track>
+</cribladderboard>

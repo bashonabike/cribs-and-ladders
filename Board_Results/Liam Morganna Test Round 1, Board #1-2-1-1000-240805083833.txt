@@ -1,0 +1,17 @@
+	Liam Morganna Test Round 1, Board #1
+Length	64
+# trials	1000
+# decks	1
+# players	2
+balance (<5% reasonable for traditional board, for comparison) 	2.00% towards Player B
+So excites (pegging)	0.375
+Boring repeats	0.448
+Snakes/Ladders	5.361
+Snakes/Ladders in 1 incr	0.442
+Snakes/Ladders in 2 incrs	0.418
+# rounds	4.349
+Likelihood So excites (pegging) per round	8.62%
+Likelihood Boring repeats per round	10.30%
+Likelihood Snakes/Ladders per round	123.27%
+Likelihood Snakes/Ladders in 1 incr per round	10.16%
+Likelihood Snakes/Ladders in 2 incrs per round	9.61%
