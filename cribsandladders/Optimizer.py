@@ -115,12 +115,12 @@ class Optimizer:
     def retrievePairingsSettings(self):
         query = "SELECT * FROM OptimizerParamPairings"
         self.pairings_df = pd.read_sql_query(query, self.sqlConn)
-        self.pairings_df.set_index(['Result'])
+        self.pairings_df.set_index(['Result'], inplace=True)
         self.pairings_df.sort_index(inplace=True)
 
         query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID IN(?,?)"
         self.absoluteBounds = pd.read_sql_query(query, self.sqlConn, params=[self.board.boardID, -1, -2])
-        self.absoluteBounds.set_index(['Param'])
+        self.absoluteBounds.set_index(['Param'], inplace=True)
         self.absoluteBounds.sort_index(inplace=True)
 
 
@@ -216,7 +216,7 @@ class Optimizer:
         self.freshResults = freshResults
 
         params_df = pd.DataFrame.from_records(freshParams)
-        params_df.set_index(['Param', 'Track_ID'])
+        params_df.set_index(['param'], inplace=True)
         params_df.sort_index(inplace=True)
 
         #Determine which result to target
@@ -224,7 +224,7 @@ class Optimizer:
         results_df['EffIterResult'] = np.where(results_df['ResultValueIterative'].notna(),
                                                results_df['ResultValueIterative'], results_df['ResultValue'])
         #NOTE: we use absolutified for WeighedResult since we are trying to find greatest offender
-        results_df['WeighedResult'] = results_df['ResultValue']*results_df['Weighing']
+        results_df['WeighedResult'] = results_df['ResultValue']*results_df['Weighting']
         results_df.sort_values(['WeighedResult'], ascending=False)
         target, targetPairings_l = None, []
         trackwise, track_ID, resultType = False, -1, ""
@@ -238,10 +238,14 @@ class Optimizer:
                 resultType = result_sr['Result'][:start_index - len("_T")]
             else:
                 resultType = result_sr['Result']
-
-            for p_idx, pair_sr in self.pairings_df.loc[result_sr[resultType]]:
+            pairings = self.pairings_df.loc[resultType]
+            if type(pairings) == pd.DataFrame:
+                for pair_sr in pairings:
+                    target = result_sr
+                    targetPairings_l.append(pair_sr.to_dict())
+            else:
                 target = result_sr
-                targetPairings_l.extend(pair_sr.to_dict())
+                targetPairings_l.append(pairings.to_dict())
             if target is None: continue
 
             #Incr or decr paired params dep on whether inverse or not
@@ -249,12 +253,10 @@ class Optimizer:
             for pairing_dct in targetPairings_l:
                 inverse = -1 if pairing_dct['Inverse'] > 0 else 1
                 absbounds_sr = self.absoluteBounds.loc[pairing_dct['Param']]
-                if trackwise:
-                    targetParams_sr = params_df.loc[(pairing_dct['Param'], str(track_ID))]
-                else:
-                    targetParams_sr = params_df[params_df.index.str.startswith(pairing_dct['Param'])]
-                for targetParam_sr in targetParams_sr:
-                    newVal = targetParam_sr['InstanceParamValue']*(1.0 - reverse*inverse*gp.changepctperiteration)
+                targetParams_df = params_df.loc[pairing_dct['Param']]
+                for idx, targetParam_sr in targetParams_df.iterrows():
+                    if trackwise and targetParam_sr['track_id'] != track_ID: continue
+                    newVal = targetParam_sr['value']*(1.0 - reverse*inverse*gp.changepctperiteration)
                     if newVal < absbounds_sr['LBound'] or newVal > absbounds_sr['UBound']:
                         paramMaxed = True
                         break
@@ -264,20 +266,24 @@ class Optimizer:
             else: break
 
         #Close up
-        self.params = params_df.to_dict()
+        params_df['param'] = params_df.index
+        self.params = []
+        for idx, sr in params_df.iterrows():
+            paramLine = dict(track_id=sr['track_id'], param=sr['param'], value=sr['value'])
+            self.params.append(paramLine)
         self.prevParams = self.params
         self.prevResults = self.freshResults
         return self.params
 
     def detWeighedScoring(self, freshResults):
         results_df = pd.DataFrame.from_records(freshResults)
-        results_df['WeighedResult'] = results_df['ResultValue']*results_df['Weighing']
+        results_df['WeighedResult'] = results_df['ResultValue']*results_df['Weighting']
         return results_df['WeighedResult'].sum()
 
     def getFminStarterParams(self):
         starterParams_l = []
         bestParams_df = pd.DataFrame.from_records(self.bestPostIterParams)
-        bestParams_df.set_index(['Param'])
+        bestParams_df.set_index(['Param'], inplace=True)
         for paramName in self.fminParamsList:
             starterParams_l.append(bestParams_df.loc(paramName)['InstanceParamValue'])
 
@@ -293,12 +299,15 @@ class Optimizer:
 
     def setBestFminParams(self, bestFminParams):
         bestIter_df = pd.DataFrame.from_records( self.bestPostIterParams)
-        bestIter_df.set_index(['Param'])
+        bestIter_df.set_index(['Param'], inplace=True)
         for idx in range(len(self.fminParamsList)):
             param_sr = bestIter_df.loc(self.fminParamsList[idx])
             param_sr['InstanceParamValue'] = bestFminParams[idx]
 
-        self.bestPostFminParams = bestIter_df.to_dict()
+        self.bestPostFminParams = []
+        for idx, sr in bestIter_df.iterrows():
+            paramLine = dict(track_id=sr['track_id'], param=sr['param'], value=sr['value'])
+            self.bestPostFminParams.append(paramLine)
 
 
 
@@ -309,7 +318,7 @@ class Optimizer:
     def setupFminParamsList(self, sampleParams):
         allPairings_sr = self.pairings_df.loc[self.pairings_df['Result'] == "ALL"]
         sampleParams_df = pd.DataFrame.from_records(sampleParams)
-        sampleParams_df.set_index(['Param'])
+        sampleParams_df.set_index(['Param'], inplace=True)
         self.fminParamsList = []
         for pairing_sr in allPairings_sr:
             for param_sr in sampleParams_df[sampleParams_df.index.str.startswith(pairing_sr['Param'])]:

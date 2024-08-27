@@ -1228,12 +1228,14 @@ class ParamSet:
         self.sqliteCursor = self.sqlConn.cursor()
 
     def intakeParams(self, instanceParams_df):
+        self.params = []
         #Cursor thru params setting as needed
         for index, param_sr in instanceParams_df.iterrows():
             # Prioritize track override if exists
-            self.params.append(dict(track_id=param_sr['track_id'], param=param_sr['Param'], value=param_sr['value']))
+            self.params.append(dict(track_id=param_sr['track_id'], param=param_sr['param'], value=param_sr['value']))
 
     def intakeParamsFromDb(self, optimizerRunSet, optimizerRun):
+        self.params = []
         paramsQuery_sb = StringIO()
         paramsQuery_sb.write("SELECT p.*")
         paramsQuery_sb.write(" from OptimizerRunTestParams p ")
@@ -1326,6 +1328,7 @@ class ParamSet:
 
         # Input metric info
         metrics_df = pd.DataFrame.from_records(evaluator.results)
+        metrics_df.drop(['Weighting', 'ResultValueIterative'], axis=1, inplace=True)
         metrics_df['OptimizerRunSet'] = evaluator.optimizerRunSet
         metrics_df['OptimizerRun'] = evaluator.optimizerRun
         metrics_df['Board_ID'] = evaluator.board.boardID
@@ -1342,6 +1345,7 @@ class ParamSet:
         metricsQuery_sb.write(") VALUES (")
         metricsQuery_sb.write(", ".join(['?'] * len(cols)))
         metricsQuery_sb.write(")")
+        print(metricsQuery_sb.getvalue())
         self.sqliteCursor.execute("BEGIN TRANSACTION")
         # self.sqliteCursor.execute("select * from  Testtest")
         for index, record in metrics_df.iterrows():

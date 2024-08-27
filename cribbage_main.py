@@ -22,8 +22,21 @@ import mystic
 from mystic.solvers import fmin
 from mystic.monitors import VerboseMonitor
 
+#NOTE: this is outside tha class called staticly to avoic sql pickling issues (Optimizer & Eval have stored conns)
+def trialsPerThread(board, squad, threadNum, trialsOnThread):
+    movesForThread = []
+    for i in range(trialsOnThread):
+        # print("Running game " + str(i + 1) + " of " + str(gp.numtrials) + "\r")
+        squad.resetRisks()
+        squad.resetScores()
+        squad.resetCanPlay()
+        # NOTE: we retain the same track per agent, even tho they are swapping leads
+        game = CribbageGame(board, squad, i, threadNum=threadNum)
+        movesForThread.extend(game.play_game())
+
+    return movesForThread
 class Routines:
-    def __init__(self):
+    def __init__(self, optimizerRunSet):
 
         #Set up lookups table in DF, index
         sqliteConn = sql.connect('etc/Lookups.db')
@@ -39,23 +52,9 @@ class Routines:
         self.squad = None
         self.posEvents = None
         self.eventSetBuilder = None
-        self.optimizerRunSet, self.optimizerRun = 2, 0
-        self.sqlOptimizerCon = sql.connect("etc/Optimizer")
+        self.optimizerRunSet, self.optimizerRun = optimizerRunSet, 0
 
         #TODO: refactor & docu https://www.sitepoint.com/refactor-code-gpt/#h-refactoring-code-with-gpt-4-and-chatgpt
-
-    def trialsPerThread(self, board, squad, threadNum, trialsOnThread):
-        movesForThread = []
-        for i in range(trialsOnThread):
-            # print("Running game " + str(i + 1) + " of " + str(gp.numtrials) + "\r")
-            squad.resetRisks()
-            squad.resetScores()
-            squad.resetCanPlay()
-            # NOTE: we retain the same track per agent, even tho they are swapping leads
-            game = CribbageGame(board, squad, i, threadNum=threadNum)
-            movesForThread.extend(game.play_game())
-
-        return movesForThread
 
 
     #TODO: run purely probabilistic mini model, run for iterative bit
@@ -67,10 +66,11 @@ class Routines:
         trialsOnThread = math.floor(gp.numtrials/gp.nummaxthreads)
         boardsToIter = [board]*gp.nummaxthreads
         squadsToIter = [squad]*gp.nummaxthreads
-        movesOnSetSplit = pool.starmap(self.trialsPerThread, zip(boardsToIter, squadsToIter, range(gp.nummaxthreads),
-                                                       repeat(trialsOnThread)))
+        movesOnSetSplit = pool.starmap(trialsPerThread, zip(boardsToIter, squadsToIter, range(gp.nummaxthreads),
+                                                        repeat(trialsOnThread)))
         movesOnSet = []
         for s in movesOnSetSplit: movesOnSet.extend(s)
+        # movesOnSet=trialsPerThread(board, squad, 0, 1)
         stats.clearStatsAndSetMoves(movesOnSet)
         stats.calc_metrics()
         # stats.print_temp_maps()
@@ -137,8 +137,10 @@ class Routines:
         self.board.setEffLandingForHolesAllTracks()
         stats = crst.Stats(self.board, self.squad)
         self.run_trials(self.board, self.squad, stats)
-        eval = evl.Evaluator(self.eventSetBuilder, self.board, self.posevents, stats, self.sqlOptimizerCon,
+        sqlOptimizerCon = sql.connect("etc/Optimizer")
+        eval = evl.Evaluator(self.eventSetBuilder, self.board, self.posevents, stats, sqlOptimizerCon,
                              self.optimizerRunSet,self.optimizerRun)
+        sqlOptimizerCon.close()
         eval.detMetrics()
         eval.writeMetricsToDb()
         self.eventSetBuilder.paramSet.tempWriteMetricsToDb(eval)
@@ -151,6 +153,7 @@ class Routines:
         self.board.setBoardAfterSetter()
         self.posevents = ps.PossibleEvents(self.board)
         self.eventSetBuilder = op.EventSetBuilder(self.board, self.posevents)
+        self.optimizer = opt.Optimizer(self.board, self.optimizerRunSet)
 
     def runFmin(self):
         # Initial guesses & bounds for the parameters
@@ -168,13 +171,14 @@ class Routines:
         return self.optimizer.bestPostFminParams
 
     def runIter(self):
+        sqlOptimizerCon = sql.connect("etc/Optimizer")
         weighedScoring = 9999999
         self.eventSetBuilder.runMonteCarlo(self.optimizerRunSet, self.optimizerRun)
         while weighedScoring > gp.iterscorecutoff:
             self.board.setEffLandingForHolesAllTracks()
             stats = crst.Stats(self.board, self.squad)
             self.run_trials(self.board, self.squad, stats)
-            eval = evl.Evaluator(self.eventSetBuilder, self.board, self.posevents, stats, self.sqlOptimizerCon,
+            eval = evl.Evaluator(self.eventSetBuilder, self.board, self.posevents, stats, sqlOptimizerCon,
                                  self.optimizerRunSet, self.optimizerRun)
             eval.detMetrics()
             eval.writeMetricsToDb()
@@ -189,6 +193,7 @@ class Routines:
             self.eventSetBuilder.buildBoardFromParams(pd.DataFrame.from_records(freshParams),
                                                       self.optimizerRunSet, self.optimizerRun)
 
+        sqlOptimizerCon.close()
         return self.optimizer.bestPostIterParams
 
 
@@ -207,4 +212,9 @@ if __name__ == "__main__":
     # game.play_game()
     # checkBoardBestTrial(1, 807)
     # genTrainSet()
-    microRegressionsUsingInputOutputPairings()
+    routines = Routines(optimizerRunSet=2)
+    routines.setUpBoard()
+    bestIterParams = routines.runIter()
+    print(bestIterParams)
+    bestFminParams = routines.runFmin()
+    print(bestFminParams)

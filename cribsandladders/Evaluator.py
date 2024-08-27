@@ -78,14 +78,14 @@ class Evaluator:
         else:
             orthos, orthosit = gp.optorthospct, gp.optorthospct
         self.results.append(dict(Result="orthos", ResultFlavour="GAME BOARD STRUCTURE SCALAR STATS",
-                                 ResultValue=orthos, IterativeResultValue=orthosit, Weighting=0.5))
+                                 ResultValue=orthos, ResultValueIterative=orthosit, Weighting=0.5))
         if self.eventSetBuilder.events > 0:
             multis = abs(gp.optmultispct - self.eventSetBuilder.multis/self.eventSetBuilder.events)
             multisit = gp.optmultispct - self.eventSetBuilder.multis/self.eventSetBuilder.events
         else:
             multis, multisit = gp.optmultispct, gp.optmultispct
         self.results.append(dict(Result="multis", ResultFlavour="GAME BOARD STRUCTURE SCALAR STATS",
-                                 ResultValue=multis, IterativeResultValue=multisit, Weighting=1))
+                                 ResultValue=multis, ResultValueIterative=multisit, Weighting=1))
 
         if self.eventSetBuilder.events > 0:
             cancels = self.eventSetBuilder.cancels/self.eventSetBuilder.events
@@ -117,7 +117,7 @@ class Evaluator:
 
         #Balance
         self.results.append(dict(Result="balance", ResultFlavour="GAMEPLAY SCALAR STATS",
-                                 ResultValue=stt.stdev(self.stats.partialBalanceSet), Weighting=30))
+                                 ResultValue=stt.stdev([b[1] for b in self.stats.partialBalanceSet]), Weighting=30))
         for b in self.stats.partialBalanceSet:
             track_id = self.board.getTrackByNum(b[0]).Track_ID
             self.results.append(dict(Result="balance_T{}".format(track_id), ResultFlavour="GAMEPLAY SCALAR STATS",
