@@ -225,7 +225,7 @@ class Optimizer:
                                                results_df['ResultValueIterative'], results_df['ResultValue'])
         #NOTE: we use absolutified for WeighedResult since we are trying to find greatest offender
         results_df['WeighedResult'] = results_df['ResultValue']*results_df['Weighting']
-        results_df.sort_values(['WeighedResult'], ascending=False)
+        results_df.sort_values(['WeighedResult'], ascending=False, inplace=True)
         target, targetPairings_l = None, []
         trackwise, track_ID, resultType = False, -1, ""
 
@@ -238,9 +238,11 @@ class Optimizer:
                 resultType = result_sr['Result'][:start_index - len("_T")]
             else:
                 resultType = result_sr['Result']
+            #Some results do not have pairings
+            if not self.pairings_df.isin([resultType]).any().any(): continue
             pairings = self.pairings_df.loc[resultType]
-            if type(pairings) == pd.DataFrame:
-                for pair_sr in pairings:
+            if isinstance(pairings, pd.DataFrame):
+                for idx, pair_sr in pairings.iterrows():
                     target = result_sr
                     targetPairings_l.append(pair_sr.to_dict())
             else:
@@ -260,7 +262,7 @@ class Optimizer:
                     if newVal < absbounds_sr['LBound'] or newVal > absbounds_sr['UBound']:
                         paramMaxed = True
                         break
-                    targetParam_sr['InstanceParamValue'] = newVal
+                    params_df.at[idx, 'value']= newVal
                 if paramMaxed: break
             if paramMaxed: continue
             else: break

@@ -184,6 +184,7 @@ class Routines:
             eval.writeMetricsToDb()
             self.eventSetBuilder.paramSet.tempWriteMetricsToDb(eval)
             weighedScoring = self.optimizer.detWeighedScoring(eval.results)
+            print(weighedScoring)
             if weighedScoring <= gp.iterscorecutoff:
                 self.optimizer.setBestIterParams(self.eventSetBuilder.paramSet.params)
                 break
