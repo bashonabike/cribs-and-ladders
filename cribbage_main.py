@@ -213,7 +213,7 @@ if __name__ == "__main__":
     # game.play_game()
     # checkBoardBestTrial(1, 807)
     # genTrainSet()
-    routines = Routines(optimizerRunSet=2)
+    routines = Routines(optimizerRunSet=1)
     routines.setUpBoard()
     bestIterParams = routines.runIter()
     print(bestIterParams)

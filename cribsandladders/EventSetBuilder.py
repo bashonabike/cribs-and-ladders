@@ -1350,7 +1350,7 @@ class ParamSet:
         # self.sqliteCursor.execute("select * from  Testtest")
         for index, record in metrics_df.iterrows():
             self.sqliteCursor.execute(metricsQuery_sb.getvalue(), [record['Result'], record['ResultFlavour'], record['ResultValue'],
-                                         record['OptimizerRun'], record['OptimizerRunSet'], record['Board_ID']])
+                                         record['OptimizerRunSet'], record['OptimizerRun'], record['Board_ID']])
 
         self.sqliteCursor.execute("END TRANSACTION")
         # sqliteCursor.executemany(metricsQuery_sb.getvalue(), metrics_df)

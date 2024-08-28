@@ -311,7 +311,7 @@ class Stats:
         self.partialBalanceSet = [float(winsByPlayer[p.num]) - (float(gp.numtrials) / float(gp.numplayers)) /
                                   float(gp.numtrials) for p in self.squad.players]
         insertstatquery_sb.write(self.buildSet4PlusInsertSnippet(self.partialBalanceSet))
-        self.partialBalanceSet = zip([p.tracknum for p in self.squad.players], self.partialBalanceSet)
+        self.partialBalanceSet = [s for s in zip([p.tracknum for p in self.squad.players], self.partialBalanceSet)]
 
         #track stats
         insertstatquery_sb.write(self.buildSet4PlusInsertSnippet(self.soexcitespeggingbytrack, self.soexcitespegging))

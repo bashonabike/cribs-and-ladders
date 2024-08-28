@@ -158,7 +158,7 @@ class Evaluator:
 
         #Calculate so-excites (maximize)
         self.results.append(dict(Result="soexcite", ResultFlavour="GAMEPLAY SCALAR STATS",
-                                 ResultValue=1.0/self.stats.soexcitespegging if self.stats.soexcitespegging > 0 else 1.0,
+                                 ResultValue=1.0/self.stats.soexcitespegging if self.stats.soexcitespegging > 0.1 else 1.0,
                                  Weighting=1))
 
         #Calculate repeats (minimize)

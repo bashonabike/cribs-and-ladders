@@ -228,6 +228,7 @@ class Optimizer:
         results_df.sort_values(['WeighedResult'], ascending=False, inplace=True)
         target, targetPairings_l = None, []
         trackwise, track_ID, resultType = False, -1, ""
+        atLeastOneValueChanged = False
 
         for r_idx, result_sr in results_df.iterrows():
             paramMaxed = False
@@ -239,7 +240,7 @@ class Optimizer:
             else:
                 resultType = result_sr['Result']
             #Some results do not have pairings
-            if not self.pairings_df.isin([resultType]).any().any(): continue
+            if not resultType in self.pairings_df.index: continue
             pairings = self.pairings_df.loc[resultType]
             if isinstance(pairings, pd.DataFrame):
                 for idx, pair_sr in pairings.iterrows():
@@ -253,19 +254,24 @@ class Optimizer:
             #Incr or decr paired params dep on whether inverse or not
             reverse = -1 if target['EffIterResult'] < 0 else 1
             for pairing_dct in targetPairings_l:
+                if trackwise != (pairing_dct['Trackwise'] == 1): continue
                 inverse = -1 if pairing_dct['Inverse'] > 0 else 1
                 absbounds_sr = self.absoluteBounds.loc[pairing_dct['Param']]
                 targetParams_df = params_df.loc[pairing_dct['Param']]
+                if isinstance(targetParams_df, pd.Series): targetParams_df=pd.DataFrame([targetParams_df])
                 for idx, targetParam_sr in targetParams_df.iterrows():
-                    if trackwise and targetParam_sr['track_id'] != track_ID: continue
+                    if trackwise and targetParam_sr['track_id'] != int(track_ID): continue
                     newVal = targetParam_sr['value']*(1.0 - reverse*inverse*gp.changepctperiteration)
+                    if absbounds_sr['isInt'] == 1: newVal = int(round(newVal, 0))
                     if newVal < absbounds_sr['LBound'] or newVal > absbounds_sr['UBound']:
                         paramMaxed = True
                         break
-                    params_df.at[idx, 'value']= newVal
+                    params_df.loc[(params_df.index == idx) & (params_df['track_id'] == targetParam_sr['track_id']),
+                    'value'] = newVal
+                    atLeastOneValueChanged = True
                 if paramMaxed: break
             if paramMaxed: continue
-            else: break
+            elif atLeastOneValueChanged: break
 
         #Close up
         params_df['param'] = params_df.index
