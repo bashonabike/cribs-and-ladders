@@ -218,13 +218,14 @@ class Optimizer:
         params_df = pd.DataFrame.from_records(freshParams)
         params_df.set_index(['param'], inplace=True)
         params_df.sort_index(inplace=True)
+        params_df['valueChanged'] = False
 
         #Determine which result to target
         results_df = pd.DataFrame.from_records(freshResults)
         results_df['EffIterResult'] = np.where(results_df['ResultValueIterative'].notna(),
                                                results_df['ResultValueIterative'], results_df['ResultValue'])
         #NOTE: we use absolutified for WeighedResult since we are trying to find greatest offender
-        results_df['WeighedResult'] = results_df['ResultValue']*results_df['Weighting']
+        results_df['WeighedResult'] = abs(results_df['ResultValue'])*results_df['Weighting']
         results_df.sort_values(['WeighedResult'], ascending=False, inplace=True)
         target, targetPairings_l = None, []
         trackwise, track_ID, resultType = False, -1, ""
@@ -250,8 +251,12 @@ class Optimizer:
                 target = result_sr
                 targetPairings_l.append(pairings.to_dict())
             if target is None: continue
+            rd.shuffle(targetPairings_l)
+
+            print("Targetting: {} with weighted score: {}".format(result_sr['Result'], result_sr['WeighedResult']))
 
             #Incr or decr paired params dep on whether inverse or not
+            #Pick random pairing if mult exist
             reverse = -1 if target['EffIterResult'] < 0 else 1
             for pairing_dct in targetPairings_l:
                 if trackwise != (pairing_dct['Trackwise'] == 1): continue
@@ -261,17 +266,24 @@ class Optimizer:
                 if isinstance(targetParams_df, pd.Series): targetParams_df=pd.DataFrame([targetParams_df])
                 for idx, targetParam_sr in targetParams_df.iterrows():
                     if trackwise and targetParam_sr['track_id'] != int(track_ID): continue
-                    newVal = targetParam_sr['value']*(1.0 - reverse*inverse*gp.changepctperiteration)
-                    if absbounds_sr['isInt'] == 1: newVal = int(round(newVal, 0))
+                    #Don't try to change a value 2x in a single incr!
+                    if targetParam_sr['valueChanged']: continue
+                    if absbounds_sr['isInt'] == 1:
+                        #Incr/decr by 1 if int
+                        newVal = int(targetParam_sr['value'] - reverse*inverse)
+                    else:
+                        newVal = targetParam_sr['value']*(1.0 - reverse*inverse*gp.changepctperiteration)
                     if newVal < absbounds_sr['LBound'] or newVal > absbounds_sr['UBound']:
                         paramMaxed = True
                         break
                     params_df.loc[(params_df.index == idx) & (params_df['track_id'] == targetParam_sr['track_id']),
                     'value'] = newVal
+                    params_df.loc[(params_df.index == idx) & (params_df['track_id'] == targetParam_sr['track_id']),
+                    'valueChanged'] = True
                     atLeastOneValueChanged = True
                 if paramMaxed: break
-            if paramMaxed: continue
-            elif atLeastOneValueChanged: break
+                if atLeastOneValueChanged: break
+            if atLeastOneValueChanged: break
 
         #Close up
         params_df['param'] = params_df.index
@@ -285,13 +297,13 @@ class Optimizer:
 
     def detWeighedScoring(self, freshResults):
         results_df = pd.DataFrame.from_records(freshResults)
-        results_df['WeighedResult'] = results_df['ResultValue']*results_df['Weighting']
+        results_df['WeighedResult'] = abs(results_df['ResultValue'])*results_df['Weighting']
         return results_df['WeighedResult'].sum()
 
     def getFminStarterParams(self):
         starterParams_l = []
         bestParams_df = pd.DataFrame.from_records(self.bestPostIterParams)
-        bestParams_df.set_index(['Param'], inplace=True)
+        bestParams_df.set_index(['param'], inplace=True)
         for paramName in self.fminParamsList:
             starterParams_l.append(bestParams_df.loc(paramName)['InstanceParamValue'])
 

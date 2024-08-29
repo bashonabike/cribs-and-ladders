@@ -1,4 +1,7 @@
-select op1.Param, op1.Track_ID, op2.OptimizerRun,  op1.InstanceParamValue,  op2.InstanceParamValue,
+select op1.Param, op1.Track_ID, op2.OptimizerRun,  op1.InstanceParamValue,
+h.LBound,
+  op2.InstanceParamValue,
+  h.UBound,
 op2.InstanceParamValue - op1.InstanceParamValue,
 
  (op2.InstanceParamValue - op1.InstanceParamValue)/op1.InstanceParamValue
@@ -9,6 +12,10 @@ and op1.Board_ID = op2.Board_ID
 and op1.OptimizerRun + 1 = op2.OptimizerRun
 and op1.Param = op2.Param
 and op1.Track_ID = op2.Track_ID
+INNER JOIN BoardTrackHints h
+on h.Board_ID = op1.Board_ID
+and h.Track_ID in (-1,-2)
+and h.Param = op1.Param
 WHERE op1.InstanceParamValue <> op2.InstanceParamValue 
 and op1.OptimizerRunSet = 1
 ORDER BY op2.OptimizerRun, op1.Param

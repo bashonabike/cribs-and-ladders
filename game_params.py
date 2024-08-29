@@ -27,17 +27,17 @@ numtrials = 1000
 nummaxthreads = 6
 #OPTIONAL run multiple boards in a batch
 batchnum = 1
-boardname = "Meg Bday Trial #2"
+boardname = "Micro Board 1"
 
 #Set if seeking optimal events layout
 findmode = True
-eventenergyfile = "C:\\Users\\Dell 5290\\Documents\\cribs-and-ladders\\Boards\\energy-curve-SONG.svg"
+eventenergyfile = "C:\\Users\\Dell 5290\\Documents\\cribs-and-ladders\\Boards\\MicroBoard1\\CURVES\\energy.svg"
 #TODO: nrg intensity curve?  going to be VERY track dependent, may struggle to converge
-eventsovertimecurvefile = "C:\\Users\\Dell 5290\\Documents\\cribs-and-ladders\\etc\\eventsovertimecurve1.svg"
-eventlengthdisthistcurvefile = "C:\\Users\\Dell 5290\\Documents\\cribs-and-ladders\\etc\\eventlengthdistcurve1.svg"
+eventsovertimecurvefile = "C:\\Users\\Dell 5290\\Documents\\cribs-and-ladders\\Boards\\MicroBoard1\\CURVES\\eventsovertime.svg"
+eventlengthdisthistcurvefile = "C:\\Users\\Dell 5290\\Documents\\cribs-and-ladders\\Boards\\MicroBoard1\\CURVES\\event-length-dist-hist.svg"
 eventlengthovertimeidealcurve1file = "C:\\Users\\Dell 5290\\Documents\\cribs-and-ladders\\etc\\eventlengthovertimeidealcurve1.svg"
-eventspacingsdisthistcurvefile = "C:\\Users\\Dell 5290\\Documents\\cribs-and-ladders\\etc\\eventspacingsdisthistcurve1.svg"
-velocityovertimecurvefile = "C:\\Users\\Dell 5290\\Documents\\cribs-and-ladders\\etc\\velocityovertimecurve1.svg"
+eventspacingsdisthistcurvefile = "C:\\Users\\Dell 5290\\Documents\\cribs-and-ladders\\Boards\\MicroBoard1\\CURVES\\spacinghist.svg"
+velocityovertimecurvefile = "C:\\Users\\Dell 5290\\Documents\\cribs-and-ladders\\Boards\\MicroBoard1\\CURVES\\velocity.svg"
 
 ####################################################################################
 #CANDIDATE SET GEN PARAMS
@@ -82,7 +82,7 @@ optmultispct = 0.05
 ##################################################################################################
 #Iterative optimizer params
 changepctperiteration = 0.02
-iterscorecutoff = 8
+iterscorecutoff = 6
 
 
 

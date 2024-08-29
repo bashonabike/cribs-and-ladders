@@ -308,7 +308,7 @@ class Stats:
         #balance stats
         #NOTE: we cannot use player.wins with the multprocessing!
         winsByPlayer = col.Counter([m.player for m in self.moves if m.winningMove])
-        self.partialBalanceSet = [float(winsByPlayer[p.num]) - (float(gp.numtrials) / float(gp.numplayers)) /
+        self.partialBalanceSet = [(float(winsByPlayer[p.num]) - (float(gp.numtrials) / float(gp.numplayers))) /
                                   float(gp.numtrials) for p in self.squad.players]
         insertstatquery_sb.write(self.buildSet4PlusInsertSnippet(self.partialBalanceSet))
         self.partialBalanceSet = [s for s in zip([p.tracknum for p in self.squad.players], self.partialBalanceSet)]

@@ -60,17 +60,20 @@ class Routines:
     #TODO: run purely probabilistic mini model, run for iterative bit
     #Maybe bounds likely peg round, likely score round, vary it bit, still do multiproc, maybe fewer trials tho
     #Since can control variability
-    def run_trials(self, board, squad, stats):
+    def run_trials(self, board, squad, stats, debug=False):
         squad.resetWins()
         pool = mp.Pool(processes=gp.nummaxthreads)
         trialsOnThread = math.floor(gp.numtrials/gp.nummaxthreads)
-        boardsToIter = [board]*gp.nummaxthreads
-        squadsToIter = [squad]*gp.nummaxthreads
-        movesOnSetSplit = pool.starmap(trialsPerThread, zip(boardsToIter, squadsToIter, range(gp.nummaxthreads),
-                                                        repeat(trialsOnThread)))
-        movesOnSet = []
-        for s in movesOnSetSplit: movesOnSet.extend(s)
-        # movesOnSet=trialsPerThread(board, squad, 0, 1)
+        #Unsure why __debug__ is flagged when run, no -o flag in command...0_o
+        if __debug__ and debug:
+            movesOnSet=trialsPerThread(board, squad, 0, 1)
+        else:
+            boardsToIter = [board]*gp.nummaxthreads
+            squadsToIter = [squad]*gp.nummaxthreads
+            movesOnSetSplit = pool.starmap(trialsPerThread, zip(boardsToIter, squadsToIter, range(gp.nummaxthreads),
+                                                            repeat(trialsOnThread)))
+            movesOnSet = []
+            for s in movesOnSetSplit: movesOnSet.extend(s)
         stats.clearStatsAndSetMoves(movesOnSet)
         stats.calc_metrics()
         # stats.print_temp_maps()
@@ -121,11 +124,11 @@ class Routines:
         eventSetBuilder.plotBoard()
 
     def microRegressionsUsingInputOutputPairings(self):
-        squad = CribSquad(self.rankLookupTable, tracksUsed=gp.tracksused)
         board = Board()
         bstr.setBoardFromDb(board, gp.boardname)
         board.setBoardAfterSetter()
         posevents = ps.PossibleEvents(board)
+        squad = CribSquad(self.rankLookupTable, board.tracks, tracksUsed=gp.tracksused)
         self.optimizer = opt.Optimizer(board, 1)
         self.optimizer.retrieveTrainData()
         self.optimizer.testGBMOnPairings(["gamelength", "balance"], "ladderscanstartat")
@@ -147,13 +150,13 @@ class Routines:
         return self.optimizer.detWeighedScoring(eval.results)
 
     def setUpBoard(self):
-        self.squad = CribSquad(self.rankLookupTable, tracksUsed=gp.tracksused)
         self.board = Board()
         bstr.setBoardFromDb(self.board, gp.boardname)
         self.board.setBoardAfterSetter()
         self.posevents = ps.PossibleEvents(self.board)
         self.eventSetBuilder = op.EventSetBuilder(self.board, self.posevents)
         self.optimizer = opt.Optimizer(self.board, self.optimizerRunSet)
+        self.squad = CribSquad(self.rankLookupTable, self.board.tracks, tracksUsed=gp.tracksused)
 
     def runFmin(self):
         # Initial guesses & bounds for the parameters
@@ -170,14 +173,14 @@ class Routines:
         self.optimizer.setBestFminParams(optimized_params)
         return self.optimizer.bestPostFminParams
 
-    def runIter(self):
+    def runIter(self, debug=False):
         sqlOptimizerCon = sql.connect("etc/Optimizer")
         weighedScoring = 9999999
-        self.eventSetBuilder.runMonteCarlo(self.optimizerRunSet, self.optimizerRun)
+        self.eventSetBuilder.runMidpointInitParams(self.optimizerRunSet, self.optimizerRun)
         while weighedScoring > gp.iterscorecutoff:
             self.board.setEffLandingForHolesAllTracks()
             stats = crst.Stats(self.board, self.squad)
-            self.run_trials(self.board, self.squad, stats)
+            self.run_trials(self.board, self.squad, stats, debug)
             eval = evl.Evaluator(self.eventSetBuilder, self.board, self.posevents, stats, sqlOptimizerCon,
                                  self.optimizerRunSet, self.optimizerRun)
             eval.detMetrics()
@@ -215,7 +218,7 @@ if __name__ == "__main__":
     # genTrainSet()
     routines = Routines(optimizerRunSet=1)
     routines.setUpBoard()
-    bestIterParams = routines.runIter()
+    bestIterParams = routines.runIter(debug=False)
     print(bestIterParams)
     bestFminParams = routines.runFmin()
     print(bestFminParams)

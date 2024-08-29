@@ -4,11 +4,14 @@ import os
 import random as r
 
 class CribSquad:
-    def __init__(self, rankLookupTable, tracksUsed = None):
+    def __init__(self, rankLookupTable, tracks, tracksUsed = None):
         self.players = []
         self.tracksUsed = tracksUsed
         if self.tracksUsed is None or len(self.tracksUsed) != gp.numplayers:
-            self.tracksUsed = [-1]*gp.numplayers
+            self.tracksUsed = []
+            for p in range(gp.numplayers):
+                if len(tracks) in (0,1): self.tracksUsed.append(0)
+                else: self.tracksUsed.append(tracks[p].num)
         for i in range(0,gp.numplayers):
             (self.players.append(pl.Player(r.randint(1,21), i + 1, rankLookupTable, self.tracksUsed[i])))
 

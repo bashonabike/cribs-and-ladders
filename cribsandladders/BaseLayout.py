@@ -6,7 +6,7 @@ import cribsandladders.PossibleEvents as ps
 
 def setTrackHolesets(tracks, boardHeight, twoDeckLineBoardPath = ""):
     twoDeckLinePath = None
-    if twoDeckLineBoardPath != "":
+    if not twoDeckLineBoardPath in ("", None):
         twoDeckLinePath =svgParserVectors(twoDeckLineBoardPath, boardHeight)[0]
 
     for track in tracks:

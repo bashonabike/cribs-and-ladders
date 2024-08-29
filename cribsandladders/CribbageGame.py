@@ -58,7 +58,6 @@ class CribbageGame:
     def __init__(self, board, squad, trial, threadNum=-1):
         self.board = board
         self.squad = squad
-        self.assignTracksToPlayers()
         self.firstDeal = random.randint(1, gp.numplayers)
         self.currentDealer = self.firstDeal
         self.verbose = False
@@ -332,18 +331,6 @@ class CribbageGame:
                     (track.ladders[ladder_index].end - track.ladders[ladder_index].start), en.Event.LADDER)
 
         return currPos + prospScore, en.Event.NONE
-    def assignTracksToPlayers(self):
-        trackNums = []
-        for track in self.board.tracks:
-            trackNums.append(track.num)
-        for player in self.squad.players:
-            #if all 1 track, set all to 0
-            if trackNums == [0]:
-                player.tracknum = 0
-            else:
-                if player.tracknum not in trackNums:
-                    player.tracknum = trackNums[0]
-                trackNums.remove(player.tracknum)
 
 
 

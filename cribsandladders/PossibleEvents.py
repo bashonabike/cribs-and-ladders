@@ -70,6 +70,7 @@ class PossibleEvents:
                  "FROM Board b WHERE b.Board_ID = ?")
         boardFiles = sqlConnBoard.execute(boardQuery, [self.board.boardID]).fetchall()
         for file in boardFiles[0]:
+            if file in ("", None): continue
             fileModTimestamp = dt.fromtimestamp(os.path.getmtime(file))
             if fileModTimestamp > tempTableUpdated:
                 print("Resetting board candidate events")

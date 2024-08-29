@@ -74,6 +74,15 @@ class EventSetBuilder:
         self.buildSetIntoEvents()
         # self.plot_coordinates_and_vectors()
 
+    def runMidpointInitParams(self, optimizerRunSet, optimizerRun):
+        self.clearEventSet()
+        self.paramSet.midpointInitParams()
+        self.paramSet.tempInsertParamsDb(optimizerRunSet, optimizerRun)
+        self.tryEventSet(self.paramSet)
+        self.buildSetIntoEvents()
+        # self.plot_coordinates_and_vectors()
+
+
     def setParamsIntoDb(self,optimizerRunSet, optimizerRun ):
         self.paramSet.tempInsertParamsDb(optimizerRunSet, optimizerRun)
 
@@ -196,7 +205,7 @@ class EventSetBuilder:
         return integrated_curve
 
     def normalizeCurveMagnitude(self, curve):
-        normalizer = max([c[1] for c in curve]) - min([c[1] for c in curve])
+        normalizer = max(abs(max([c[1] for c in curve])), abs(min([c[1] for c in curve])))
         if normalizer > 0:
             normalized_curve = []
             for i in range(0, len(curve)):
@@ -207,14 +216,14 @@ class EventSetBuilder:
         return curve
 
 
-    def actualizeCurve(self, curve, x_actualizer, y_actualizer):
+    def actualizeCurve(self, curve, x_actualizer, y_actualizer, integrate=False):
         actualized_curve = []
         for i in range(0, len(curve)):
             actx = curve[i][0]*x_actualizer
-            if i == 0:
-                acty = curve[i][1]*y_actualizer
+            if integrate and i > 0:
+                acty = (curve[i - 1][1] + curve[i][1]) * y_actualizer
             else:
-                acty = (curve[i - 1][1] + curve[i][1])*y_actualizer
+                acty = curve[i][1]*y_actualizer
             actualized_curve.append((actx, acty))
 
         return actualized_curve
@@ -805,7 +814,7 @@ class EventSetBuilder:
                                                    (candAvgEnergy*t['optevents'])/normTrackCurveNetEnergy)
             t['trackenergycurve'] = trackEnergyCurve
             trackEnergyIntegral = self.actualizeCurve(energyNormIntegral, t['track'].length,
-                                                      candAvgEnergy * t['optevents'])
+                                                      candAvgEnergy * t['optevents'], integrate=True)
             t['trackenergyintegral'] = trackEnergyIntegral
             t['compensationbuffer'] = t['lengthdeviation']*len(t['track'].trackholes)
             t['track'].setTentativeEvents([])
@@ -1253,8 +1262,46 @@ class ParamSet:
             self.params.append(dict(track_id=param_sr['Track_ID'], param=param_sr['Param'],
                                     value=param_sr['InstanceParamValue']))
 
+    def midpointInitParams(self):
+        #Retrieve base values from db
+        query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID = ?"
+        self.sqliteCursor.execute(query, [self.board.boardID, 0])
+        boardparamranges_df = pd.DataFrame(self.sqliteCursor.fetchall(),
+                                          columns=[d[0] for d in self.sqliteCursor.description])
+        if len(boardparamranges_df) == 0:
+            raise Exception("No param bounds found for board ID {}".format(self.board.boardID))
 
+        # Set params from ranges for board
+        self.params = []
+        # for index, param_sr in boardparamranges_df.iterrows():
+        #     # Prioritize track override if exists
+        #     if param_sr['isInt'] == 1:
+        #         curVal = rd.randint(int(param_sr['LBound']), int(param_sr['UBound']))
+        #     else:
+        #         curVal = rd.uniform(param_sr['LBound'], param_sr['UBound'])
+        #     self.params.append(dict(track_id=0, param=param_sr['Param'], value=curVal))
 
+        for t in self.tracks:
+            # Try to retrieve overrides if exist
+            query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID = ?"
+            self.sqliteCursor.execute(query, [self.board.boardID, t.Track_ID])
+            trackparamranges_df = pd.concat([pd.DataFrame(self.sqliteCursor.fetchall(),
+                                              columns=[d[0] for d in self.sqliteCursor.description]),
+                                             boardparamranges_df])
+            trackparamranges_df.sort_values(['Param', 'Track_ID'], inplace=True,
+                                            ascending=False)
+
+            #Set params from ranges
+            prevParam = ""
+            for index, param_sr in trackparamranges_df.iterrows():
+                #Prioritize track override if exists
+                if param_sr['Param'] == prevParam: continue
+                if param_sr['isInt'] == 1:
+                    curVal = (int(param_sr['LBound']) + int(param_sr['UBound']))//2
+                else:
+                    curVal = (param_sr['LBound'] + param_sr['UBound'])/2
+                self.params.append(dict(track_id=t.Track_ID, param=param_sr['Param'], value=curVal))
+                prevParam = param_sr['Param']
 
     def monteCarlo(self):
         #Retrieve base values from db
@@ -1345,7 +1392,6 @@ class ParamSet:
         metricsQuery_sb.write(") VALUES (")
         metricsQuery_sb.write(", ".join(['?'] * len(cols)))
         metricsQuery_sb.write(")")
-        print(metricsQuery_sb.getvalue())
         self.sqliteCursor.execute("BEGIN TRANSACTION")
         # self.sqliteCursor.execute("select * from  Testtest")
         for index, record in metrics_df.iterrows():
