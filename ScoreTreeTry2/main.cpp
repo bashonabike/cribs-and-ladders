@@ -92,7 +92,10 @@ std::pair<int, bool> scoreCalc(const std::vector<Card>& sequence, int current_su
     if (baseScore == 0) return { 0, false };
 
     int baseHole = nextPlayer ? nextPlayerCurrPos + baseScore : current_pos + baseScore;
-    int landHole = nextPlayer ? effLandingForNextPlayerHoles[baseHole - 1] : effLandingForHoles[baseHole - 1];
+	int landHole = baseHole;
+	if (effLandingForNextPlayerHoles.size() > 0) {
+		landHole = nextPlayer ? effLandingForNextPlayerHoles[baseHole - 1] : effLandingForHoles[baseHole - 1];
+	}
 
     return { (landHole - (nextPlayer ? nextPlayerCurrPos : current_pos)), landHole != baseHole };
 }
@@ -144,6 +147,7 @@ int getCardToPlay(std::vector<int>& handMuxed, int nextPlayerNumCardsLeftInHand,
     std::vector<int>& effLandingForHoles, std::vector<int>& effLandingForNextPlayerHoles,
     int current_sum, int current_pos, int nextPlayerCurrPos, int numdecks) {
 		
+		
     std::vector<Card> hand;
     std::vector<Card> sequence;
 	
@@ -174,17 +178,15 @@ int getCardToPlay(std::vector<int>& handMuxed, int nextPlayerNumCardsLeftInHand,
             else some_no_events = true;
         }
     }
-
     if (some_events && some_no_events) soexcite_peg = true;
 	
-	if (nextPlayerCurrPos > -1 && nextPlayerNumCardsLeftInHand > -1 && effLandingForNextPlayerHoles.size() > 0) {
+	if (nextPlayerCurrPos > -1 && nextPlayerNumCardsLeftInHand > 0 && effLandingForNextPlayerHoles.size() > 0) {
 
 		std::vector<Card> cardsPlayed(hand);
 		cardsPlayed.insert(cardsPlayed.end(), sequence.begin(), sequence.end());
 		std::vector<Card> deckWithoutCards = buildDeckWithoutSpecCards(numdecks, cardsPlayed);
 		int cardsAvailForNextOpponent = deckWithoutCards.size();
 		
-
 		for (auto& n : level_1) {
 			std::vector<int> scoreDistribution;
 			for (const auto& card : deckWithoutCards) {
@@ -279,9 +281,7 @@ PYBIND11_MODULE(scoretree, m) {
     )pbdoc";
 
     m.def("getCardToPlay", getCardToPlay, R"pbdoc(
-        Print first and last name
-
-        Some other explanation about the printName function.
+        Get card to play
     )pbdoc");
 
 #ifdef VERSION_INFO

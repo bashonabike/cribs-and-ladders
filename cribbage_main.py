@@ -65,8 +65,8 @@ class Routines:
         pool = mp.Pool(processes=gp.nummaxthreads)
         trialsOnThread = math.floor(gp.numtrials/gp.nummaxthreads)
         #Unsure why __debug__ is flagged when run, no -o flag in command...0_o
-        if __debug__ and debug:
-            movesOnSet=trialsPerThread(board, squad, 0, 1)
+        if debug:
+            movesOnSet=trialsPerThread(board, squad, 0, 5)
         else:
             boardsToIter = [board]*gp.nummaxthreads
             squadsToIter = [squad]*gp.nummaxthreads
@@ -85,7 +85,7 @@ class Routines:
         self.board.setEffLandingForHolesAllTracks()
         sqlOptimizerCon = sql.connect("etc/Optimizer")
         for i in range(2553, 3001):
-            stats = crst.Stats(self.board, self.squad)
+            stats = crst.Stats(self.board, self.squad, self.optimizerRunSet, self.optimizerRun)
             eventSetBuilder.runMonteCarlo(i)
             self.board.setEffLandingForHolesAllTracks()
             start = time.time()
@@ -107,7 +107,7 @@ class Routines:
         self.board.setEffLandingForHolesAllTracks()
         eventSetBuilder.plotBoard()
         eventSetBuilder.setParamsIntoDb(2, 100001)
-        stats = crst.Stats(self.board, self.squad)
+        stats = crst.Stats(self.board, self.squad, self.optimizerRunSet, self.optimizerRun)
         self.run_trials(self.board, self.squad, stats)
         sqlOptimizerCon = sql.connect("etc/Optimizer")
         eval = evl.Evaluator(eventSetBuilder, self.board, self.posevents, stats, sqlOptimizerCon, self.optimizerRunSet, 100001)
@@ -138,7 +138,7 @@ class Routines:
         self.eventSetBuilder.modParamsForFmin(paramsSubset, self.optimizer.bestPostIterParams,
                                               self.optimizerRunSet, self.optimizerRun)
         self.board.setEffLandingForHolesAllTracks()
-        stats = crst.Stats(self.board, self.squad)
+        stats = crst.Stats(self.board, self.squad, self.optimizerRunSet, self.optimizerRun)
         self.run_trials(self.board, self.squad, stats)
         sqlOptimizerCon = sql.connect("etc/Optimizer")
         eval = evl.Evaluator(self.eventSetBuilder, self.board, self.posevents, stats, sqlOptimizerCon,
@@ -158,10 +158,21 @@ class Routines:
         self.optimizer = opt.Optimizer(self.board, self.optimizerRunSet)
         self.squad = CribSquad(self.rankLookupTable, self.board.tracks, tracksUsed=gp.tracksused)
 
+    def runNormalCribGame(self, debug=False):
+        self.board = Board()
+        bstr.setBoardFromDb(self.board, gp.boardname)
+        self.board.setEffLandingForHolesAllTracks()
+        self.squad = CribSquad(self.rankLookupTable, self.board.tracks)
+        stats = crst.Stats(self.board, self.squad, self.optimizerRunSet, self.optimizerRun)
+        self.run_trials(self.board, self.squad, stats, debug=debug)
+
+
+
     def runFmin(self):
         # Initial guesses & bounds for the parameters
+        self.optimizer.setupFminParamsList(self.eventSetBuilder.paramSet.params)
         initial_guess = self.optimizer.getFminStarterParams()
-        bounds = self.optimizer.getFminBounds()
+        bounds = self.optimizer.getFminBounds(self.eventSetBuilder.paramSet.params)
         # Set up a monitor to observe the optimization progress
         monitor = VerboseMonitor(10)
 
@@ -179,13 +190,18 @@ class Routines:
         self.eventSetBuilder.runMidpointInitParams(self.optimizerRunSet, self.optimizerRun)
         while weighedScoring > gp.iterscorecutoff:
             self.board.setEffLandingForHolesAllTracks()
-            stats = crst.Stats(self.board, self.squad)
+            stats = crst.Stats(self.board, self.squad, self.optimizerRunSet, self.optimizerRun)
             self.run_trials(self.board, self.squad, stats, debug)
             eval = evl.Evaluator(self.eventSetBuilder, self.board, self.posevents, stats, sqlOptimizerCon,
                                  self.optimizerRunSet, self.optimizerRun)
+
+
+
+
             eval.detMetrics()
             eval.writeMetricsToDb()
             self.eventSetBuilder.paramSet.tempWriteMetricsToDb(eval)
+            # self.eventSetBuilder.paramSet.tempWriteEvents(stats, self.optimizerRunSet, self.optimizerRun)
             weighedScoring = self.optimizer.detWeighedScoring(eval.results)
             print(weighedScoring)
             if weighedScoring <= gp.iterscorecutoff:
@@ -216,9 +232,14 @@ if __name__ == "__main__":
     # game.play_game()
     # checkBoardBestTrial(1, 807)
     # genTrainSet()
+
     routines = Routines(optimizerRunSet=1)
+    # routines.runNormalCribGame(debug=False)
+
+
+
     routines.setUpBoard()
-    bestIterParams = routines.runIter(debug=False)
+    bestIterParams = routines.runIter(debug=True)
     print(bestIterParams)
     bestFminParams = routines.runFmin()
     print(bestFminParams)

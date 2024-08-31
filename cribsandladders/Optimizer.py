@@ -265,23 +265,41 @@ class Optimizer:
                 targetParams_df = params_df.loc[pairing_dct['Param']]
                 if isinstance(targetParams_df, pd.Series): targetParams_df=pd.DataFrame([targetParams_df])
                 for idx, targetParam_sr in targetParams_df.iterrows():
-                    if trackwise and targetParam_sr['track_id'] != int(track_ID): continue
+                    #If balance, reverse on opposing tracks
+                    reverseTrackwise = 1
+                    if trackwise:
+                        if targetParam_sr['track_id'] == int(track_ID):
+                            reverseTrackwise = 1
+                        elif resultType == "balance":
+                            reverseTrackwise = -1
+                        else: continue
+
                     #Don't try to change a value 2x in a single incr!
                     if targetParam_sr['valueChanged']: continue
-                    if absbounds_sr['isInt'] == 1:
-                        #Incr/decr by 1 if int
-                        newVal = int(targetParam_sr['value'] - reverse*inverse)
+                    # if absbounds_sr['isInt'] == 1:
+                    #     #Incr/decr by 1 if int
+                    #     # newVal = int(targetParam_sr['value'] - reverse*inverse*reverseTrackwise)
+                    #     newVal = targetParam_sr['value']*(1.0 - reverse*inverse*reverseTrackwise*gp.changepctperiteration)
+                    # else:
+                    #     newVal = targetParam_sr['value']*(1.0 - reverse*inverse*reverseTrackwise*gp.changepctperiteration)
+                    if targetParam_sr['value'] == 0:
+                        newVal = 1
                     else:
-                        newVal = targetParam_sr['value']*(1.0 - reverse*inverse*gp.changepctperiteration)
+                        newVal = targetParam_sr['value'] * (
+                                    1.0 - reverse * inverse * reverseTrackwise * gp.changepctperiteration)
+                    
+
                     if newVal < absbounds_sr['LBound'] or newVal > absbounds_sr['UBound']:
                         paramMaxed = True
-                        break
-                    params_df.loc[(params_df.index == idx) & (params_df['track_id'] == targetParam_sr['track_id']),
-                    'value'] = newVal
-                    params_df.loc[(params_df.index == idx) & (params_df['track_id'] == targetParam_sr['track_id']),
-                    'valueChanged'] = True
-                    atLeastOneValueChanged = True
-                if paramMaxed: break
+                    else:
+                        oldVal = targetParam_sr['value']
+                        params_df.loc[(params_df.index == idx) & (params_df['track_id'] == targetParam_sr['track_id']),
+                        'value'] = newVal
+                        params_df.loc[(params_df.index == idx) & (params_df['track_id'] == targetParam_sr['track_id']),
+                        'valueChanged'] = True
+                        atLeastOneValueChanged = True
+                        print("Adjusting param {} on track {} from {} to {}".format(idx, targetParam_sr['track_id'],
+                                                                                    oldVal, newVal))
                 if atLeastOneValueChanged: break
             if atLeastOneValueChanged: break
 
@@ -305,15 +323,21 @@ class Optimizer:
         bestParams_df = pd.DataFrame.from_records(self.bestPostIterParams)
         bestParams_df.set_index(['param'], inplace=True)
         for paramName in self.fminParamsList:
-            starterParams_l.append(bestParams_df.loc(paramName)['InstanceParamValue'])
+            paramsByTrack_df = bestParams_df.loc[paramName]
+            for idx, param_sr in paramsByTrack_df.iterrows():
+                starterParams_l.append(param_sr['value'])
 
         return starterParams_l
 
-    def getFminBounds(self):
+    def getFminBounds(self, sampleParams):
         selectBounds_l = []
+        sampleParams_df = pd.DataFrame.from_records(sampleParams)
+        sampleParams_df.set_index(['param'], inplace=True)
+        sampleParams_df.sort_index(inplace=True)
         for paramName in self.fminParamsList:
-            bounds_sr = self.absoluteBounds.loc(paramName)
-            selectBounds_l.append((bounds_sr['LBound'], bounds_sr['UBound']))
+            for idx, pairing_sr in sampleParams_df.loc[paramName].iterrows():
+                bounds_sr = self.absoluteBounds.loc[paramName]
+                selectBounds_l.append((bounds_sr['LBound'], bounds_sr['UBound']))
 
         return selectBounds_l
 
@@ -336,13 +360,11 @@ class Optimizer:
 
 
     def setupFminParamsList(self, sampleParams):
-        allPairings_sr = self.pairings_df.loc[self.pairings_df['Result'] == "ALL"]
+        allPairings_df = self.pairings_df[self.pairings_df.index == "ALL"]
         sampleParams_df = pd.DataFrame.from_records(sampleParams)
-        sampleParams_df.set_index(['Param'], inplace=True)
         self.fminParamsList = []
-        for pairing_sr in allPairings_sr:
-            for param_sr in sampleParams_df[sampleParams_df.index.str.startswith(pairing_sr['Param'])]:
-                self.fminParamsList.append(param_sr.index)
+        for idx, pairing_sr in allPairings_df.iterrows():
+            self.fminParamsList.append(pairing_sr['Param'])
 
     def setParamFromBounds(self, gameParamBounds):
         if gameParamBounds[2]:

@@ -75,6 +75,10 @@ class Evaluator:
 
 
     def detMetrics(self):
+
+
+
+
         #GAME BOARD STRUCTURE SCALAR STATS
         if self.eventSetBuilder.events > 0:
             orthos = abs(gp.optorthospct - self.eventSetBuilder.orthos/self.eventSetBuilder.events)
@@ -96,7 +100,7 @@ class Evaluator:
         else:
             cancels = 0
         self.results.append(dict(Result="cancels", ResultFlavour="GAME BOARD STRUCTURE SCALAR STATS",
-                                 ResultValue=cancels, Weighting=4))
+                                 ResultValue=cancels, Weighting=6))
 
 
         #GAME BOARD STRUCTURE STATISTIC STATS
@@ -404,6 +408,10 @@ class CurveOptimizer:
         denominator = np.dot(y_actualized_ideal, y_actualized_ideal)
 
         if denominator == 0:
+            print("y_smoothed:")
+            print(y_smoothed)
+            print("y_actualized_ideal:")
+            print(y_actualized_ideal)
             raise ZeroDivisionError("Denominator in scaling factor calculation is zero.")
 
         self.optimal_scale = numerator / denominator

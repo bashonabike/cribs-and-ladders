@@ -15,11 +15,15 @@ import sqlite3 as sql
 import datetime as dt
 from io import StringIO
 import os
+from collections import defaultdict
+
 class Stats:
 
-    def __init__(self, board, squad):
+    def __init__(self, board, squad, optimizerRunSet, optimizerRun):
         self.board = board
         self.squad = squad
+        self.optimizerRunSet = optimizerRunSet
+        self.optimizerRun = optimizerRun
 
         self.moves = []
 
@@ -132,9 +136,33 @@ class Stats:
     def calc_metrics(self):
         # Build dataframes & indices
         moves_df = pd.DataFrame.from_records([m.to_dict() for m in self.moves])
+        # print("Liklihood given hole hit: " + str(len(self.moves)/(gp.numplayers*gp.effectiveboardlength*gp.numtrials)))
+        # max_rounds_per_trial = defaultdict(int)
+        #
+        # for event in self.moves:
+        #     max_rounds_per_trial[event.trial] = max(max_rounds_per_trial[event.trial], event.round)
+        #
+        # # Step 2: Calculate the average of the max rounds
+        # max_rounds = max_rounds_per_trial.values()
+        # average_max_round = sum(max_rounds) / len(max_rounds)
+        # print("Avg rounds/game: {}".format(average_max_round))
+        #
+        # totPegMoves = len([m for m in self.moves if m.pegMove])
+        # avgMovesPerPegging = totPegMoves/(gp.numtrials*gp.numplayers*average_max_round)
+        # print("Avg moves per pegging: {}".format(avgMovesPerPegging))
+        #
+        # totHand = len([m for m in self.moves if not m.pegMove])
+        # for i in range(1, 20):
+        #     tempp = [m.to_dict() for m in self.moves if m.score == i and not m.pegMove]
+        #     print("Hand {} - {}".format(i, len(tempp)/(totHand)))
+        # totPeg = len([m for m in self.moves if m.pegMove])
+        # for i in range(1, 20):
+        #     tempp = [m.to_dict() for m in self.moves if m.score == i and m.pegMove]
+        #     print("Peg {} - {}".format(i, len(tempp)/(totPeg)))
         ladders_df = pd.concat([t.getLaddersAsDF() for t in self.board.tracks])
         chutes_df = pd.concat([t.getChutesAsDF() for t in self.board.tracks])
         events_df = pd.concat([t.getEventsAsDF() for t in self.board.tracks])
+
 
         #set up chutes & ladder df's if none defined in input
         if ladders_df.columns is None or len(ladders_df.columns) == 0:
@@ -411,7 +439,7 @@ class Stats:
 
 class Move:
     def __init__(self, threadnum, trial, track, moveNum, round, playerNum, oldScore, baseScore, reason, event, newScore,
-                        soexcite):
+                        soexcite, pegMove):
         eventAmt = newScore - oldScore - baseScore
         self.threadnum = threadnum
         self.trial = trial
@@ -419,9 +447,11 @@ class Move:
         self.movenum = moveNum
         self.player = playerNum
         self.track = track.num
+        self.track_id = track.Track_ID
         self.soexcite = soexcite
         self.round = round
         self.hasEvent = event != en.Event.NONE
+        self.pegMove = pegMove
 
         self.ladderamt = 0
         self.chuteamt = 0
@@ -463,6 +493,7 @@ class Move:
      ,'player'      : self.player
      ,'round'      : self.round
      ,'track' : self.track
+     ,'track_id' : self.track_id
      ,'score'  : self.score
      ,'basescore' : self.basescore
      ,'ladderamt'    : self.ladderamt
@@ -476,5 +507,6 @@ class Move:
      ,'posin2'       : self.posin2
      ,'soexcite'       : self.soexcite
      ,'reason'       : self.reason
-     ,'winningMove'       : self.winningMove
+     ,'winningmove'       : self.winningMove
+            ,'pegmove' : self.pegMove
         }

@@ -72,6 +72,7 @@ class CribbageGame:
         The main gameplay function
         To get the scores post game, check game.a_score and game.b_score
         """
+        self.currentDealer = random.randint(1, gp.numplayers)
         while not self.run_round():
             #NOTE: we put the +1 ouside the mod since players start at 1
             self.currentDealer = (self.currentDealer) % gp.numplayers + 1
@@ -106,7 +107,7 @@ class CribbageGame:
         if self.verbose:
             print("The cut card is the", card_to_string(cut_card))
         if cut_card.rank == 11:  # if the a jack is turned
-            self.score_points(2, "His heels", self.squad.getPlayerByNum(self.currentDealer))
+            self.score_points(2, "His heels", self.squad.getPlayerByNum(self.currentDealer), True)
 
         # run pegging
         if self.pegging():
@@ -153,7 +154,7 @@ class CribbageGame:
 
             print("\n")
 
-    def score_points(self, amount, reason, player, soexcite = False):
+    def score_points(self, amount, reason, player, pegMove, soexcite = False):
         """
         scores points for a player
         :param amount: the amount of points scored
@@ -169,7 +170,7 @@ class CribbageGame:
         self.moveNum += 1
         #event: 0 is non, 1 is chute, 2 is ladder
         self.moves.append(Move(self.threadNum, self.trial, curTrack, self.moveNum, self.round, player.num, player.score,
-                               amount, reason, event, newPos, soexcite))
+                               amount, reason, event, newPos, soexcite, pegMove))
         player.score = newPos
         if player.score >= curTrack.efflength:
             player.wins += 1
@@ -210,7 +211,8 @@ class CribbageGame:
                 cannotPlayCounter += 1
 
                 if cannotPlayCounter >= gp.numplayers:
-                    if self.score_points(1, "Last card", lastPlayedPlayer):
+                    #NOTE: we score 31 as 2, so no extra point
+                    if total != 31 and self.score_points(1, "Last card", lastPlayedPlayer, True):
                         return True
                     if self.squad.donePegging():
                         return False
@@ -227,7 +229,7 @@ class CribbageGame:
             nextPlayerCardsInHand, nextPlayerCurrPos = -1, -1
             if nextPlayer is not None:
                 nextPlayerEffHoles_l = self.board.getTrackByNum(nextPlayer.tracknum).effLandingForHoles
-                nextPlayerCardsInHand = len(nextPlayer.hand)
+                nextPlayerCardsInHand = len(nextPlayer.pegginghand)
                 nextPlayerCurrPos = nextPlayer.score
             (pickMuxed, soexcite) = player.pegging_move(deepcopy(seq), total, curTrack.effLandingForHoles,
                                                    nextPlayerEffHoles_l, nextPlayerCardsInHand, nextPlayerCurrPos)
@@ -295,12 +297,12 @@ class CribbageGame:
         if peg_val(card) + total == 15:
             pegScore += 2
 
-        # Get sum to 31 (NOTE: only score 1, remaining point will be calculated in end-pegging step
+        # Get sum to 31 (NOTE we lump final move point in here)
         if peg_val(card) + total == 31:
-            pegScore += 1
+            pegScore += 2
 
         if pegScore > 0:
-            return self.score_points(pegScore, "", player, soexcite)
+            return self.score_points(pegScore, "", player, True, soexcite)
 
         return False
 
@@ -314,7 +316,7 @@ class CribbageGame:
         :param cutcard: the cut card
         :return:
         """
-        return self.score_points(sh.score_hand(hand4cards, cutcard, is_crib), "Their cards", player)
+        return self.score_points(sh.score_hand(hand4cards, cutcard, is_crib), "Their cards", player, False)
 
     def checkChuteOrLadderForPos(self, track, prospScore, currPos):
         if prospScore == 0:

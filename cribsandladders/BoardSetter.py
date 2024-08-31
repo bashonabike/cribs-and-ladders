@@ -68,13 +68,13 @@ def setBoardFromDb(board,  boardName):
         query = ("select c.Track_ID, c.Chute_ID, c.Start as start, c.End as end from Chute c where c.Board_ID = {}"
                  .format(boardAndTracks_df.iloc[0]['Board_ID']))
         # chutes_df = board.getData(sqliteCursor, query, "No chutes found for board name \"{}\"".format(boardName))
-        chutes_df = board.getData(sqliteCursor, query, "", True)
+        chutes_df = getData(sqliteCursor, query, "", True)
         if len(chutes_df) > 0:
             chutes_df.sort_values(['Track_ID', 'start'])
         query = ("select l.Track_ID, l.Ladder_ID, l.Start as start, l.End as end from Ladder l where l.Board_ID = {}"
                  .format(boardAndTracks_df.iloc[0]['Board_ID']))
         # ladders_df = board.getData(sqliteCursor, query, "No ladders found for board name \"{}\"".format(boardName))
-        ladders_df = board.getData(sqliteCursor, query, "", True)
+        ladders_df = getData(sqliteCursor, query, "", True)
         if len(ladders_df) > 0:
             ladders_df.sort_values(['Track_ID', 'start'])
 

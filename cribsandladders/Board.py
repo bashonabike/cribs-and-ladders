@@ -160,18 +160,22 @@ class Track:
 
     def setEffLandingForHoles(self):
         self.effLandingForHoles = []
-        for i in range(0, len(self.trackholes)):
-            effLanding = i+1
-            chute_index = bsc.bisect_left(self.eventsListChute, i+1)
-            if (chute_index < len(self.eventsListChute) and
-                    self.eventsListChute[chute_index] == i+1):
-                effLanding = self.chutes[chute_index].start
-                #There should never be both chute and ladder on same space!
-            ladder_index = bsc.bisect_left(self.eventsListLadder, (i+1))
-            if (ladder_index < len(self.eventsListLadder) and
-                    self.eventsListLadder[ladder_index] == i+1):
-                effLanding = self.ladders[ladder_index].end
-            self.effLandingForHoles.append(effLanding)
+        if self.trackholes is None or len(self.trackholes) == 0:
+            for i in range(self.length):
+                self.effLandingForHoles.append(i+1)
+        else:
+            for i in range(0, len(self.trackholes)):
+                effLanding = i+1
+                chute_index = bsc.bisect_left(self.eventsListChute, i+1)
+                if (chute_index < len(self.eventsListChute) and
+                        self.eventsListChute[chute_index] == i+1):
+                    effLanding = self.chutes[chute_index].start
+                    #There should never be both chute and ladder on same space!
+                ladder_index = bsc.bisect_left(self.eventsListLadder, (i+1))
+                if (ladder_index < len(self.eventsListLadder) and
+                        self.eventsListLadder[ladder_index] == i+1):
+                    effLanding = self.ladders[ladder_index].end
+                self.effLandingForHoles.append(effLanding)
 
 
     def setHolesetIndexer(self):
