@@ -67,7 +67,6 @@ class EventSetBuilder:
                 raise Exception(
                 "Passed max # iters ({}) to find an event set.  ".format(gp.maxitertrynewbuild) +
                 "This board may not be feasible.  Try adding more folds in the tracks")
-            self.paramSet.monteCarlo()
         self.buildSetIntoEvents()
         #TEMPPP!
         # self.plot_coordinates_and_vectors()
@@ -76,7 +75,13 @@ class EventSetBuilder:
         self.clearEventSet()
         self.paramSet.monteCarlo()
         self.paramSet.tempInsertParamsDb(optimizerRunSet, optimizerRun)
-        self.tryEventSet(self.paramSet)
+        builditer = 0
+        while not self.tryEventSet(self.paramSet):
+            builditer += 1
+            if builditer > gp.maxitertrynewbuild:
+                raise Exception(
+                    "Passed max # iters ({}) to find an event set.  ".format(gp.maxitertrynewbuild) +
+                    "This board may not be feasible.  Try adding more folds in the tracks")
         self.buildSetIntoEvents()
         # self.plot_coordinates_and_vectors()
 
@@ -84,7 +89,13 @@ class EventSetBuilder:
         self.clearEventSet()
         self.paramSet.midpointInitParams()
         self.paramSet.tempInsertParamsDb(optimizerRunSet, optimizerRun)
-        self.tryEventSet(self.paramSet)
+        builditer = 0
+        while not self.tryEventSet(self.paramSet):
+            builditer += 1
+            if builditer > gp.maxitertrynewbuild:
+                raise Exception(
+                    "Passed max # iters ({}) to find an event set.  ".format(gp.maxitertrynewbuild) +
+                    "This board may not be feasible.  Try adding more folds in the tracks")
         self.buildSetIntoEvents()
         # self.plot_coordinates_and_vectors()
 
@@ -96,7 +107,13 @@ class EventSetBuilder:
         self.clearEventSet()
         self.paramSet.intakeParamsFromDb(optimizerRunSet, optimizerRun)
         # self.paramSet.tempInsertParamsDb(100000+optimizerRun)
-        self.tryEventSet(self.paramSet)
+        builditer = 0
+        while not self.tryEventSet(self.paramSet):
+            builditer += 1
+            if builditer > gp.maxitertrynewbuild:
+                raise Exception(
+                    "Passed max # iters ({}) to find an event set.  ".format(gp.maxitertrynewbuild) +
+                    "This board may not be feasible.  Try adding more folds in the tracks")
         self.buildSetIntoEvents()
 
     def modParamsForFmin(self, paramsSubset, fminParamsList, optimizerRunSet, optimizerRun):
@@ -104,14 +121,26 @@ class EventSetBuilder:
 
         self.clearEventSet()
         self.paramSet.tempInsertParamsDb(optimizerRunSet, optimizerRun)
-        self.tryEventSet(self.paramSet)
+        builditer = 0
+        while not self.tryEventSet(self.paramSet):
+            builditer += 1
+            if builditer > gp.maxitertrynewbuild:
+                raise Exception(
+                    "Passed max # iters ({}) to find an event set.  ".format(gp.maxitertrynewbuild) +
+                    "This board may not be feasible.  Try adding more folds in the tracks")
         self.buildSetIntoEvents()
 
 
     def buildBoardFromParams(self, instanceParams_df, optimizerRunSet, optimizerRun):
         self.clearEventSet()
         self.paramSet.intakeParams(instanceParams_df)
-        self.tryEventSet(self.paramSet)
+        builditer = 0
+        while not self.tryEventSet(self.paramSet):
+            builditer += 1
+            if builditer > gp.maxitertrynewbuild:
+                raise Exception(
+                    "Passed max # iters ({}) to find an event set.  ".format(gp.maxitertrynewbuild) +
+                    "This board may not be feasible.  Try adding more folds in the tracks")
         self.paramSet.tempInsertParamsDb(optimizerRunSet, optimizerRun)
         self.buildSetIntoEvents()
 
@@ -291,7 +320,8 @@ class EventSetBuilder:
         return effectors
 
 
-    def runPartialTrackEffLengthHoles (self, partialEventSet, trackActualLength, tentNewLadder=None, tentNewChute=None):
+    def runPartialTrackEffLengthHoles (self, partialEventSet, trackActualLength, tentNewLadder=None, tentNewChute=None,
+                                       overrideIters = -1):
         #Markov chain forecasting
         #INCORPORATE CRIB EVERY N'TH TURNM!!
         partialEventMappings = [dict(start=e.startHole.num, end=e.endHole.num)
@@ -320,7 +350,10 @@ class EventSetBuilder:
 
         #Figure out length of partial game
         movesAllTrials = 0
-        for trial in range(gp.probminimodeliters):
+        if overrideIters < 0: iters = gp.probminimodeliters
+        else: iters = overrideIters
+
+        for trial in range(iters):
             #Set up trial gameplay
             dealer = rd.randint(1, gp.numplayers)
             curPos = 0
@@ -354,7 +387,7 @@ class EventSetBuilder:
                 dealer = 1 + dealer%gp.numplayers
 
         #Forecast length of game based on control-case ideal moves:hole ratio
-        actualPartialMoves = (movesAllTrials/gp.probminimodeliters)
+        actualPartialMoves = (movesAllTrials/iters)
         eventlessCtrlPartialMoves = (gp.ideallikelihoodholehit*partialTrackEnd)
         shiftPct = actualPartialMoves/eventlessCtrlPartialMoves
         forecastedTrackEffLengthHoles = trackActualLength*shiftPct
@@ -1101,8 +1134,9 @@ class EventSetBuilder:
 
         effLengths = []
         for t in trackEventsOverview:
-            effLengths.append(dict(track_id=t['track_id'],
-                                   efflength=self.runPartialTrackEffLengthHoles(t['eventsetbuild'], t['tracklength'])))
+            effLengths.append(dict(trackeventoverview=t, track_id=t['track_id'],
+                                   efflength=self.runPartialTrackEffLengthHoles(t['eventsetbuild'], t['tracklength'],
+                                                                                overrideIters=3000)))
             sortedNodes = t['eventnodes']
             sortedNodes.sort()
             self.eventNodesByTrack.append(dict(tracknum=t['tracknum'], nodes=sortedNodes))
@@ -1113,6 +1147,26 @@ class EventSetBuilder:
             print("Track {} has effective length of {}, which should yield an approx {} balance"
                   .format(l['track_id'], l['efflength'],
                           (avgEffLength-l['efflength'])/avgEffLength))
+
+        if (sum([abs(l['efflength'] - gp.effectiveboardlength) for l in effLengths])/len(effLengths)
+                > gp.minqualityboardlengthmatching):
+            #Massage balanceandefflengthcontrolfactor and retry
+            for l in effLengths:
+                oldVal = self.paramSet.tryGetParam(l['track_id'], "balanceandefflengthcontrolfactor")
+                newVal = oldVal
+                if l['efflength'] < gp.effectiveboardlength - gp.minqualityboardlengthmatching:
+                    #Increase factor to lengthen board
+                    newVal = oldVal + gp.minqualityboardlengthintervalsrpt
+                elif l['efflength'] > gp.effectiveboardlength + gp.minqualityboardlengthmatching:
+                    #Decrease factor to shorten board
+                    newVal = oldVal - gp.minqualityboardlengthintervalsrpt
+                if newVal > 0.95: newVal = 0.95
+                elif newVal < 0.05: newVal = 0.05
+                self.paramSet.tryModParam(l['track_id'], "balanceandefflengthcontrolfactor", newVal)
+                print("Retry, not good enough board eff length quality\n")
+
+            return False
+
 
         #Try to bring all sets down to lowest one! since cannot really decrease eff length at this point
         #Given set of ladders, assume liklihood of landing on that square is 1/trackholes
@@ -1586,3 +1640,10 @@ class ParamSet:
             raise Exception("{} not found for track_ID {}".format(paramName, track_ID))
 
         return record['value']
+
+    def tryModParam(self, track_ID, paramName, newValue):
+        # Iterate through the list of dictionaries
+        for record in self.params :
+            if record['track_id'] == track_ID and record['param'] == paramName:
+                record['value'] = newValue
+                break  # Exit the loop once the record is found and modified

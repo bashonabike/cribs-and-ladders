@@ -56,6 +56,8 @@ maxeventsettrials = 100
 maxitersconvergeoneventtrialset = 200
 maxitertrynewbuild = 50
 maxitertrackstalled = 20
+minqualityboardlengthmatching = 4 #Try to get within 4 holes of ideal
+minqualityboardlengthintervalsrpt = 0.02
 
 #OPTIMIZER BALANCING PARAMS
 #NOTE: changing these will require code changes!!!
