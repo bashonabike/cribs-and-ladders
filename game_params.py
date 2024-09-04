@@ -27,7 +27,7 @@ numtrials = 1000
 nummaxthreads = 2
 #OPTIONAL run multiple boards in a batch
 batchnum = 1
-boardname = "Micro Board 1"
+boardname = "Meg Bday Trial #2"
 
 #Set if seeking optimal events layout
 findmode = True
@@ -47,7 +47,7 @@ maxladderlength = 20
 eventminspacing = 5 #mm
 maxeventlineext = 100
 mincrowvectordistcancel = 12 #mm, since straight line approx this equates to ~15mm curvy, need room to discernibly add lump on 1 side
-whenstartworryingaboutcancels = 3 #After this many cancels on a track, start impeding
+whenstartworryingaboutcancels = 6 #After this many cancels on a track, start impeding
 probminimodeliters = 200
 
 #OPTIMIZER BOUNDING PARAMS

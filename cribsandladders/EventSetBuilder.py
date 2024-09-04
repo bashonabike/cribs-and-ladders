@@ -11,6 +11,8 @@
 # output specified best x number of trials
 import math
 import random as rd
+import sqlite3
+
 import game_params as gp
 import cribsandladders.PossibleEvents as ps
 import cribsandladders.BaseLayout as bse
@@ -25,6 +27,8 @@ from collections import Counter
 import sqlite3 as sql
 from datetime import datetime as dt
 from io import StringIO
+import contextlib
+from collections import defaultdict
 
 #TODO: curvify lines, order by length in holes, curve it bspline? then iterate out making sure curve does not interfere with any neighbours
 #maybe do this as sep class, once have a board w/ tracks and events established, call Curvify
@@ -47,6 +51,8 @@ class EventSetBuilder:
         self.posPegProbs =  [item["prob"] for item in gp.probPegHist]
         self.pegRounds =  [item["rounds"] for item in gp.probPegRounds]
         self.pegRoundProbs =  [item["prob"] for item in gp.probPegRounds]
+        self.benchmarkMoves_df = None
+        self.track_dict = None
 
     def clearEventSet(self):
         self.allTentLengthHisto = []
@@ -147,6 +153,73 @@ class EventSetBuilder:
     def plotBoard(self):
         self.plot_coordinates_and_vectors()
 
+    def retrieveOrGenerateBenchmarkMoves(self):
+        with contextlib.closing(sql.connect('etc/Optimizer.db')) as sqlConn:
+            with sqlConn:
+                with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
+                    #Try retrieve benchmark moves
+                    query = "SELECT * FROM BenchmarkMoves WHERE Board_ID = ?"
+                    sqliteCursor.execute(query, [self.board.boardID])
+                    self.benchmarkMoves_df = pd.DataFrame(sqliteCursor.fetchall(),
+                                                       columns=[d[0] for d in sqliteCursor.description])
+        if len(self.benchmarkMoves_df) == 0:
+            #Generate new benchmark moves out to double track length
+            insertQuery = "INSERT INTO BenchmarkMoves VALUES(?,?,?,?,?)"
+            for t in self.board.tracks:
+                with contextlib.closing(sql.connect('etc/Optimizer.db')) as sqlConn:
+                    with sqlConn:
+                        with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
+                            sqliteCursor.execute("BEGIN TRANSACTION")
+                            effLength, sequences = self.runPartialTrackEffLengthHoles(t.Track_ID,[],
+                                                                                      2*len(t.trackholes))
+                            for trial in range(len(sequences)):
+                                for move in range(len(sequences[trial])):
+                                    sqliteCursor.execute(insertQuery, [self.board.boardID, t.Track_ID, trial, move,
+                                                                       sequences[trial][move]])
+                            sqliteCursor.execute("END TRANSACTION")
+
+            #Retrieve newly created benchmarks
+            with contextlib.closing(sql.connect('etc/Optimizer.db')) as sqlConn:
+                with sqlConn:
+                    with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
+                        #Try retrieve benchmark moves
+                        query = "SELECT * FROM BenchmarkMoves WHERE Board_ID = ?"
+                        sqliteCursor.execute(query, [self.board.boardID])
+                        self.benchmarkMoves_df = pd.DataFrame(sqliteCursor.fetchall(),
+                                                           columns=[d[0] for d in sqliteCursor.description])
+
+        #Index & sort
+        # self.benchmarkMoves_df.set_index(['Track_ID', 'Trial', 'MoveNum'], inplace=True)
+        # self.benchmarkMoves_df.sort_index(inplace=True)
+
+
+        # Initialize a dictionary to hold the lists per Track_ID
+        track_dict = defaultdict(list)
+
+        # Group the DataFrame by Track_ID and Trial
+        grouped = self.benchmarkMoves_df.groupby(['Track_ID', 'Trial'])
+
+        # Iterate over each group
+        for (track_id, trial), group in grouped:
+            # Create a list of MoveNums with MoveVal stored
+            moves_list = [(row['MoveNum'], row['MoveVal']) for _, row in group.iterrows()]
+
+            # Sort moves_list by MoveNum
+            moves_list.sort(key=lambda x: x[0])
+
+            # Store only MoveVal in the correct order of MoveNum
+            trial_list = [move_val for _, move_val in moves_list]
+
+            # Append the trial_list to the corresponding Track_ID
+            track_dict[track_id].append(trial_list)
+
+        # Convert defaultdict to regular dict for easier access
+        self.track_dict = dict(track_dict)
+
+        # Convert each trial's list to just MoveVal list
+        for track_id in self.track_dict:
+            for i in range(len(self.track_dict[track_id])):
+                self.track_dict[track_id][i] = [val for val in self.track_dict[track_id][i]]
 
     def buildPartialSetIntoTrack (self, track, startPoint, stopPoint):
             for e in range(startPoint, stopPoint):
@@ -320,8 +393,8 @@ class EventSetBuilder:
         return effectors
 
 
-    def runPartialTrackEffLengthHoles (self, partialEventSet, trackActualLength, tentNewLadder=None, tentNewChute=None,
-                                       overrideIters = -1):
+    def runPartialTrackEffLengthHoles (self, track_id, partialEventSet, trackActualLength, tentNewLadder=None, tentNewChute=None,
+                                       overrideIters = -1, readMode = False):
         #Markov chain forecasting
         #INCORPORATE CRIB EVERY N'TH TURNM!!
         partialEventMappings = [dict(start=e.startHole.num, end=e.endHole.num)
@@ -334,13 +407,9 @@ class EventSetBuilder:
             partialEventMappings.append(dict(start=tentNewChute[0], end=tentNewChute[1]))
         partialEventMappings.sort(key=lambda e: e['start'])
 
-        #Partial finish 1 after last partial event
-        partialTrackEnd = max(max([e['start'] for e in partialEventMappings]),
-                              max([e['end'] for e in partialEventMappings]))  + 1
-
         effHoleMap = []
         eIdx = 0
-        for idx in range(partialTrackEnd):
+        for idx in range(trackActualLength):
             if eIdx < len(partialEventMappings) and partialEventMappings[eIdx]['start'] == idx + 1:
                 effHoleMap.append(partialEventMappings[eIdx]['end'])
                 eIdx += 1
@@ -354,47 +423,81 @@ class EventSetBuilder:
             iters = gp.probminimodeliters
         else:
             iters = overrideIters
-            partialTrackEnd = trackActualLength
 
+        sequencesOfMoves = []
+        moveCounter = 0
+        curSequence = []
+        curReadSeq = []
         for trial in range(iters):
             #Set up trial gameplay
+            startLoc = 0
+            if not readMode:
+                if trial > 0: sequencesOfMoves.append(curSequence)
+                curSequence = []
+            else:
+                moveCounter = 0
+                # startLoc = self.benchmarkMoves_df.index.get_loc((track_id, trial, 0))
+                curReadSeq = self.track_dict[track_id][trial]
             dealer = rd.randint(1, gp.numplayers)
             curPos = 0
-            while curPos < partialTrackEnd:
-                #Run pegging:
-                pegRounds = rd.choices(self.pegRounds, weights=self.pegRoundProbs, k=1)[0]
-                for r in range(pegRounds):
-                    curMove = rd.choices(self.posPegs, weights=self.posPegProbs, k=1)[0]
+            countLoops = 0
+            trackPosSeq = []
+            while curPos < trackActualLength:
+                if not readMode:
+                    #Run pegging:
+                    pegRounds = rd.choices(self.pegRounds, weights=self.pegRoundProbs, k=1)[0]
+                    for r in range(pegRounds):
+                        curMove = rd.choices(self.posPegs, weights=self.posPegProbs, k=1)[0]
+                        curSequence.append(curMove)
+                        if curPos + curMove > len(effHoleMap):
+                            curPos += curMove
+                        else:
+                            curPos = effHoleMap[curPos + curMove - 1]
+                        movesAllTrials += 1
+                        if curPos >= trackActualLength: break
+                    if curPos >= trackActualLength: break
+
+                    #Score hand
+                    curMove = rd.choices(self.posHands, weights=self.posHandProbs, k=1)[0]
+                    curSequence.append(curMove)
+                    if curPos + curMove > len(effHoleMap): curPos += curMove
+                    else: curPos = effHoleMap[curPos + curMove - 1]
+                    movesAllTrials += 1
+                    if curPos >= trackActualLength: break
+
+                    if dealer == 1:
+                        #Score crib
+                        curMove = rd.choices(self.posHands, weights=self.posHandProbs, k=1)[0]
+                        curSequence.append(curMove)
+                        if curPos + curMove > len(effHoleMap): curPos += curMove
+                        else: curPos = effHoleMap[curPos + curMove - 1]
+                        movesAllTrials += 1
+                        if curPos >= trackActualLength: break
+                    dealer = 1 + dealer%gp.numplayers
+                else:
+                    # curMove = self.benchmarkMoves_df.iloc[startLoc + moveCounter]['MoveVal']
+                    curMove = curReadSeq[moveCounter]
+                    if moveCounter ==0:
+                        countLoops += 1
+                    moveCounter = (moveCounter + 1)%len(curReadSeq)
                     if curPos + curMove > len(effHoleMap):
                         curPos += curMove
                     else:
                         curPos = effHoleMap[curPos + curMove - 1]
+                    trackPosSeq.append(curPos)
                     movesAllTrials += 1
-                    if curPos >= partialTrackEnd: break
-                if curPos >= partialTrackEnd: break
-
-                #Score hand
-                curMove = rd.choices(self.posHands, weights=self.posHandProbs, k=1)[0]
-                if curPos + curMove > len(effHoleMap): curPos += curMove
-                else: curPos = effHoleMap[curPos + curMove - 1]
-                movesAllTrials += 1
-                if curPos >= partialTrackEnd: break
-
-                if dealer == 1:
-                    #Score crib
-                    curMove = rd.choices(self.posHands, weights=self.posHandProbs, k=1)[0]
-                    if curPos + curMove > len(effHoleMap): curPos += curMove
-                    else: curPos = effHoleMap[curPos + curMove - 1]
-                    movesAllTrials += 1
-                    if curPos >= partialTrackEnd: break
-                dealer = 1 + dealer%gp.numplayers
+                    if countLoops > 10:
+                        #Track is stuck in an infinite loop!!! This event is no bueno
+                        return 9999999, []
+                    if curPos >= trackActualLength: break
+        if not readMode: sequencesOfMoves.append(curSequence)
 
         #Forecast length of game based on control-case ideal moves:hole ratio
         actualPartialMoves = (movesAllTrials/iters)
-        eventlessCtrlPartialMoves = (gp.ideallikelihoodholehit*partialTrackEnd)
+        eventlessCtrlPartialMoves = (gp.ideallikelihoodholehit*trackActualLength)
         shiftPct = actualPartialMoves/eventlessCtrlPartialMoves
         forecastedTrackEffLengthHoles = trackActualLength*shiftPct
-        return forecastedTrackEffLengthHoles
+        return forecastedTrackEffLengthHoles, sequencesOfMoves
 
 
     def scoreEventsForHole (self, t, hole,
@@ -447,6 +550,10 @@ class EventSetBuilder:
         #         and spaceSinceLastChute % 2 == 0): return []
 
         # Passed gauntlet!  Let's try to find an event to deplete this energy
+
+        baselinePartialLength, sequencesOfMoves = self.runPartialTrackEffLengthHoles(t['track_id'],
+                                                                                     t['eventsetbuild'], t['tracklength'],
+                                                                                     readMode=True)
         eventFitnesses = []
         explicitEventCounter = 0
         while ((explicitEvent is not None and explicitEventCounter < 1) or
@@ -573,9 +680,10 @@ class EventSetBuilder:
                         if explicitEvent is not None and explicitLadder: continue
                         effEnergy = candEventSpecs['length']
                         # modsForType = allModsIfChute
-                        effLengthForecast = self.runPartialTrackEffLengthHoles(t['eventsetbuild'], t['tracklength'],
+                        effLengthForecast = self.runPartialTrackEffLengthHoles(t['track_id'], t['eventsetbuild'], t['tracklength'],
                                                                                tentNewChute=(candEventSpecs['event'].endHole.num,
-                                                                                             candEventSpecs['event'].startHole.num))
+                                                                                             candEventSpecs['event'].startHole.num),
+                                                                               readMode=True)[0]
                     case en.InstanceEventType.LADDERONLY:
                         if not canBeLadder: continue
                         if (explicitEvent is None and not candEventSpecs['event'].isOrtho and
@@ -584,50 +692,58 @@ class EventSetBuilder:
                         if explicitEvent is not None and explicitChute: continue
                         effEnergy = candEventSpecs['length']
                         # modsForType = allModsIfLadder
-                        effLengthForecast = self.runPartialTrackEffLengthHoles(t['eventsetbuild'], t['tracklength'],
+                        effLengthForecast = self.runPartialTrackEffLengthHoles(t['track_id'], t['eventsetbuild'], t['tracklength'],
                                                                                tentNewLadder=(candEventSpecs['event'].startHole.num,
-                                                                                             candEventSpecs['event'].endHole.num))
+                                                                                             candEventSpecs['event'].endHole.num),
+                                                                               readMode=True)[0]
                     case en.InstanceEventType.CHUTEANDLADDER:
                         if not (canBeChute and canBeLadder): continue
                         effEnergy = 2*candEventSpecs['length']
                         # modsForType = allModsIfChute + allModsIfLadder
-                        effLengthForecast = self.runPartialTrackEffLengthHoles(t['eventsetbuild'], t['tracklength'],
+                        effLengthForecast = self.runPartialTrackEffLengthHoles(t['track_id'], t['eventsetbuild'], t['tracklength'],
                                                                                tentNewLadder=(candEventSpecs['event'].startHole.num,
                                                                                              candEventSpecs['event'].endHole.num),
                                                                                tentNewChute=(candEventSpecs['event'].endHole.num,
-                                                                                             candEventSpecs['event'].startHole.num))
+                                                                                             candEventSpecs['event'].startHole.num),
+                                                                               readMode=True)[0]
 
                 #NOTE: impeders are (-), boosters are (+)
-                effCompModulation = ((effLengthForecast - gp.effectiveboardlength)
-                                     *(t['tracklength']/gp.effectiveboardlength) - t['compensationbuffer'])
-                #Dampen modulation as per certainty (estimate by % events filled)
-                compCert = min(len(t['eventsetbuild'])/params.tryGetParam(t['track_id'], 'baseopteventspertrack'), 1.0)
-                effCompModulation *= compCert
+                effCompModulation = effLengthForecast - baselinePartialLength
+                # print(str(effCompModulation))
 
                 # effEnergyModulation = 0
                 # if len(modsForType) > 0:
                 #     #Any two-hits increase nrg, no matter up or down
                 #     effEnergyModulation += sum([m['scaledenergymod'] for m in modsForType])
 
-
-                curScore = abs(effEnergy - t['energybuffer'])
+                #BASE SCORE ON BLEND MOD + ENERGY
+                # curScore = 0.3*abs(effEnergy - t['energybuffer'])/abs(t['energybuffer']) + 0.7* 10*pow(abs(t['compensationbuffer'] + effCompModulation)/abs(t['compensationbuffer']), 4)
+                if abs(t['compensationbuffer'] + effCompModulation) < abs(t['compensationbuffer']):
+                    curScore =0.1
+                elif abs(t['compensationbuffer'] + effCompModulation) > abs(t['compensationbuffer']):
+                    curScore = 10
+                else:
+                    curScore = 1
                 effNetEnergy = effEnergy + abs(effCompModulation)
 
                 #Adjust score based on direction of effCompModulation (trying to get to 0)
                 #Again, boosters are (+) and vice versa, so we attempt negation
-                if effCompModulation != 0:
-                    #balanceandefflengthcontrolfactor shifts based on whether game needs more lengthening or shortening
-                    if t['compensationbuffer'] < 0:
-                        effControlFactor = (1.0 - params.tryGetParam(t['track_id'], 'balanceandefflengthcontrolfactor'))
-                    else:
-                        effControlFactor = params.tryGetParam(t['track_id'], 'balanceandefflengthcontrolfactor')
-
-                    if abs(t['compensationbuffer'] + effCompModulation) < abs(t['compensationbuffer']):
-                        #Good, reward heavily!
-                        curScore *= effControlFactor
-                    else:
-                        #Punish
-                        curScore /= effControlFactor
+                tempp = False
+                # if effCompModulation != 0:
+                #     # print("Score b4 comp, hist & cancel mods: {}".format(curScore))
+                #     tempp = True
+                #     #balanceandefflengthcontrolfactor shifts based on whether game needs more lengthening or shortening
+                #     if t['compensationbuffer'] < 0:
+                #         effControlFactor = (1.0 - params.tryGetParam(t['track_id'], 'balanceandefflengthcontrolfactor'))
+                #     else:
+                #         effControlFactor = params.tryGetParam(t['track_id'], 'balanceandefflengthcontrolfactor')
+                #
+                #     if abs(t['compensationbuffer'] + effCompModulation) < abs(t['compensationbuffer']):
+                #         #Good, reward heavily!
+                #         curScore *= effControlFactor
+                #     else:
+                #         #Punish
+                #         curScore /= effControlFactor
 
                 #TODO: re-factor in twohitimpedanceeffector, maybe just via a count, incl twohits dict item in cand etc
 
@@ -672,6 +788,8 @@ class EventSetBuilder:
                 #     curScore *= (1.0 + (curLenPerc-avgPerc)*params.tryGetParam(t['track_id'],'lengthhistogramscoringfactor)
 
                 #Add event score to output list
+                # if tempp: print("Score after hist & cancel mods: {}".format(curScore))
+                print("{} {}".format(instType, curScore))
                 eventFitnesses.append(dict(event=candEventSpecs['event'],
                                            eventspecs=candEventSpecs,
                                            score=curScore, effnetenergy=effNetEnergy, effcompmodulation=effCompModulation,
@@ -904,6 +1022,9 @@ class EventSetBuilder:
                                     multistack=[])
                           for t in self.board.tracks]
 
+        #Load benchmarks
+        self.retrieveOrGenerateBenchmarkMoves()
+
         #Retrieve & normalize energy curve and det integral
         energyCurve, energyNormIntegral = self.getEnergyCurve()
 
@@ -981,7 +1102,7 @@ class EventSetBuilder:
             trackEnergyIntegral = self.actualizeCurve(energyNormIntegral, t['track'].length,
                                                       candAvgEnergy * t['optevents'], integrate=True)
             t['trackenergyintegral'] = trackEnergyIntegral
-            t['compensationbuffer'] = t['lengthdeviation']*len(t['track'].trackholes)
+            t['compensationbuffer'] = t['lengthdeviation']*gp.effectiveboardlength
             t['track'].setTentativeEvents([])
             t['eventsetbuild'] = t['track'].eventSetBuild
 
@@ -1138,11 +1259,13 @@ class EventSetBuilder:
         effLengths = []
         for t in trackEventsOverview:
             effLengths.append(dict(trackeventoverview=t, track_id=t['track_id'],
-                                   efflength=self.runPartialTrackEffLengthHoles(t['eventsetbuild'], t['tracklength'],
-                                                                                overrideIters=3000)))
+                                   efflength=self.runPartialTrackEffLengthHoles(t['track_id'], t['eventsetbuild'],
+                                                                                t['tracklength'],
+                                                                                     readMode=True)[0]))
             sortedNodes = t['eventnodes']
             sortedNodes.sort()
             self.eventNodesByTrack.append(dict(tracknum=t['tracknum'], nodes=sortedNodes))
+            print(len(t['chutes'])-len(t['ladders']))
 
         avgEffLength = sum(l['efflength'] for l in effLengths)/len(effLengths)
 
@@ -1440,8 +1563,6 @@ class ParamSet:
         self.board = board
         self.tracks = tracks
         self.params = []
-        self.sqlConn = sql.connect('etc/Optimizer.db')
-        self.sqliteCursor = self.sqlConn.cursor()
 
     def intakeParams(self, instanceParams_df):
         self.params = []
@@ -1451,178 +1572,196 @@ class ParamSet:
             self.params.append(dict(track_id=param_sr['track_id'], param=param_sr['param'], value=param_sr['value']))
 
     def intakeParamsFromDb(self, optimizerRunSet, optimizerRun):
-        self.params = []
-        paramsQuery_sb = StringIO()
-        paramsQuery_sb.write("SELECT p.*")
-        paramsQuery_sb.write(" from OptimizerRunTestParams p ")
-        paramsQuery_sb.write("inner join OptimizerRuns o ")
-        paramsQuery_sb.write("on o.OptimizerRun = p.OptimizerRun ")
-        paramsQuery_sb.write("inner join OptimizerRunSets os ")
-        paramsQuery_sb.write("on os.OptimizerRunSet = o.OptimizerRunSet ")
-        paramsQuery_sb.write("where os.OptimizerRunSet = ? ")
-        paramsQuery_sb.write("and o.OptimizerRun = ? ")
-        params_df = pd.read_sql_query(paramsQuery_sb.getvalue(), self.sqlConn,
-                                           params=[optimizerRunSet, optimizerRun])
-        #Cursor thru params setting as needed
-        for index, param_sr in params_df.iterrows():
-            # Prioritize track override if exists
-            self.params.append(dict(track_id=param_sr['Track_ID'], param=param_sr['Param'],
-                                    value=param_sr['InstanceParamValue']))
+        with contextlib.closing(sql.connect('etc/Optimizer.db')) as sqlConn:
+            with sqlConn:
+                self.params = []
+                paramsQuery_sb = StringIO()
+                paramsQuery_sb.write("SELECT p.*")
+                paramsQuery_sb.write(" from OptimizerRunTestParams p ")
+                paramsQuery_sb.write("inner join OptimizerRuns o ")
+                paramsQuery_sb.write("on o.OptimizerRun = p.OptimizerRun ")
+                paramsQuery_sb.write("inner join OptimizerRunSets os ")
+                paramsQuery_sb.write("on os.OptimizerRunSet = o.OptimizerRunSet ")
+                paramsQuery_sb.write("where os.OptimizerRunSet = ? ")
+                paramsQuery_sb.write("and o.OptimizerRun = ? ")
+                params_df = pd.read_sql_query(paramsQuery_sb.getvalue(), sqlConn,
+                                                   params=[optimizerRunSet, optimizerRun])
+                #Cursor thru params setting as needed
+                for index, param_sr in params_df.iterrows():
+                    # Prioritize track override if exists
+                    self.params.append(dict(track_id=param_sr['Track_ID'], param=param_sr['Param'],
+                                            value=param_sr['InstanceParamValue']))
+
 
     def midpointInitParams(self):
-        #Retrieve base values from db
-        query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID = ?"
-        self.sqliteCursor.execute(query, [self.board.boardID, 0])
-        boardparamranges_df = pd.DataFrame(self.sqliteCursor.fetchall(),
-                                          columns=[d[0] for d in self.sqliteCursor.description])
-        if len(boardparamranges_df) == 0:
-            raise Exception("No param bounds found for board ID {}".format(self.board.boardID))
+        with contextlib.closing(sql.connect('etc/Optimizer.db')) as sqlConn:
+            with sqlConn:
+                with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
+                    #Retrieve base values from db
+                    query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID = ?"
+                    sqliteCursor.execute(query, [self.board.boardID, 0])
+                    boardparamranges_df = pd.DataFrame(sqliteCursor.fetchall(),
+                                                      columns=[d[0] for d in sqliteCursor.description])
+                    if len(boardparamranges_df) == 0:
+                        raise Exception("No param bounds found for board ID {}".format(self.board.boardID))
 
-        # Set params from ranges for board
-        self.params = []
-        # for index, param_sr in boardparamranges_df.iterrows():
-        #     # Prioritize track override if exists
-        #     if param_sr['isInt'] == 1:
-        #         curVal = rd.randint(int(param_sr['LBound']), int(param_sr['UBound']))
-        #     else:
-        #         curVal = rd.uniform(param_sr['LBound'], param_sr['UBound'])
-        #     self.params.append(dict(track_id=0, param=param_sr['Param'], value=curVal))
+                    # Set params from ranges for board
+                    self.params = []
+                    # for index, param_sr in boardparamranges_df.iterrows():
+                    #     # Prioritize track override if exists
+                    #     if param_sr['isInt'] == 1:
+                    #         curVal = rd.randint(int(param_sr['LBound']), int(param_sr['UBound']))
+                    #     else:
+                    #         curVal = rd.uniform(param_sr['LBound'], param_sr['UBound'])
+                    #     self.params.append(dict(track_id=0, param=param_sr['Param'], value=curVal))
 
-        for t in self.tracks:
-            # Try to retrieve overrides if exist
-            query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID = ?"
-            self.sqliteCursor.execute(query, [self.board.boardID, t.Track_ID])
-            trackparamranges_df = pd.concat([pd.DataFrame(self.sqliteCursor.fetchall(),
-                                              columns=[d[0] for d in self.sqliteCursor.description]),
-                                             boardparamranges_df])
-            trackparamranges_df.sort_values(['Param', 'Track_ID'], inplace=True,
-                                            ascending=False)
+                    for t in self.tracks:
+                        # Try to retrieve overrides if exist
+                        query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID = ?"
+                        sqliteCursor.execute(query, [self.board.boardID, t.Track_ID])
+                        trackparamranges_df = pd.concat([pd.DataFrame(sqliteCursor.fetchall(),
+                                                          columns=[d[0] for d in sqliteCursor.description]),
+                                                         boardparamranges_df])
+                        trackparamranges_df.sort_values(['Param', 'Track_ID'], inplace=True,
+                                                        ascending=False)
 
-            #Set params from ranges
-            prevParam = ""
-            for index, param_sr in trackparamranges_df.iterrows():
-                #Prioritize track override if exists
-                if param_sr['Param'] == prevParam: continue
-                if param_sr['isInt'] == 1:
-                    curVal = (int(param_sr['LBound']) + int(param_sr['UBound']))//2
-                else:
-                    curVal = (param_sr['LBound'] + param_sr['UBound'])/2
-                self.params.append(dict(track_id=t.Track_ID, param=param_sr['Param'], value=curVal))
-                prevParam = param_sr['Param']
+                        #Set params from ranges
+                        prevParam = ""
+                        for index, param_sr in trackparamranges_df.iterrows():
+                            #Prioritize track override if exists
+                            if param_sr['Param'] == prevParam: continue
+                            if param_sr['isInt'] == 1:
+                                curVal = (int(param_sr['LBound']) + int(param_sr['UBound']))//2
+                            else:
+                                curVal = (param_sr['LBound'] + param_sr['UBound'])/2
+                            self.params.append(dict(track_id=t.Track_ID, param=param_sr['Param'], value=curVal))
+                            prevParam = param_sr['Param']
 
     def monteCarlo(self):
-        #Retrieve base values from db
-        query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID = ?"
-        self.sqliteCursor.execute(query, [self.board.boardID, 0])
-        boardparamranges_df = pd.DataFrame(self.sqliteCursor.fetchall(),
-                                          columns=[d[0] for d in self.sqliteCursor.description])
-        if len(boardparamranges_df) == 0:
-            raise Exception("No param bounds found for board ID {}".format(self.board.boardID))
-
-        # Set params from ranges for board
-        self.params = []
-        # for index, param_sr in boardparamranges_df.iterrows():
-        #     # Prioritize track override if exists
-        #     if param_sr['isInt'] == 1:
-        #         curVal = rd.randint(int(param_sr['LBound']), int(param_sr['UBound']))
-        #     else:
-        #         curVal = rd.uniform(param_sr['LBound'], param_sr['UBound'])
-        #     self.params.append(dict(track_id=0, param=param_sr['Param'], value=curVal))
-
-        for t in self.tracks:
-            # Try to retrieve overrides if exist
-            query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID = ?"
-            self.sqliteCursor.execute(query, [self.board.boardID, t.Track_ID])
-            trackparamranges_df = pd.concat([pd.DataFrame(self.sqliteCursor.fetchall(),
-                                              columns=[d[0] for d in self.sqliteCursor.description]),
-                                             boardparamranges_df])
-            trackparamranges_df.sort_values(['Param', 'Track_ID'], inplace=True,
-                                            ascending=False)
-
-            #Set params from ranges
-            prevParam = ""
-            for index, param_sr in trackparamranges_df.iterrows():
-                #Prioritize track override if exists
-                if param_sr['Param'] == prevParam: continue
-                if param_sr['isInt'] == 1:
-                    curVal = rd.randint(int(param_sr['LBound']), int(param_sr['UBound']))
-                else:
-                    curVal = rd.uniform(param_sr['LBound'], param_sr['UBound'])
-                self.params.append(dict(track_id=t.Track_ID, param=param_sr['Param'], value=curVal))
-                prevParam = param_sr['Param']
+        with contextlib.closing(sql.connect('etc/Optimizer.db')) as sqlConn:
+            with sqlConn:
+                with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
+                    #Retrieve base values from db
+                    query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID = ?"
+                    sqliteCursor.execute(query, [self.board.boardID, 0])
+                    boardparamranges_df = pd.DataFrame(sqliteCursor.fetchall(),
+                                                      columns=[d[0] for d in sqliteCursor.description])
+                    if len(boardparamranges_df) == 0:
+                        raise Exception("No param bounds found for board ID {}".format(self.board.boardID))
+            
+                    # Set params from ranges for board
+                    self.params = []
+                    # for index, param_sr in boardparamranges_df.iterrows():
+                    #     # Prioritize track override if exists
+                    #     if param_sr['isInt'] == 1:
+                    #         curVal = rd.randint(int(param_sr['LBound']), int(param_sr['UBound']))
+                    #     else:
+                    #         curVal = rd.uniform(param_sr['LBound'], param_sr['UBound'])
+                    #     self.params.append(dict(track_id=0, param=param_sr['Param'], value=curVal))
+            
+                    for t in self.tracks:
+                        # Try to retrieve overrides if exist
+                        query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID = ?"
+                        sqliteCursor.execute(query, [self.board.boardID, t.Track_ID])
+                        trackparamranges_df = pd.concat([pd.DataFrame(sqliteCursor.fetchall(),
+                                                          columns=[d[0] for d in sqliteCursor.description]),
+                                                         boardparamranges_df])
+                        trackparamranges_df.sort_values(['Param', 'Track_ID'], inplace=True,
+                                                        ascending=False)
+            
+                        #Set params from ranges
+                        prevParam = ""
+                        for index, param_sr in trackparamranges_df.iterrows():
+                            #Prioritize track override if exists
+                            if param_sr['Param'] == prevParam: continue
+                            if param_sr['isInt'] == 1:
+                                curVal = rd.randint(int(param_sr['LBound']), int(param_sr['UBound']))
+                            else:
+                                curVal = rd.uniform(param_sr['LBound'], param_sr['UBound'])
+                            self.params.append(dict(track_id=t.Track_ID, param=param_sr['Param'], value=curVal))
+                            prevParam = param_sr['Param']
 
 
     def tempInsertParamsDb(self, optimizerRunSet, optimizerRun):
-        query = "INSERT INTO OptimizerRuns (OptimizerRunSet, OptimizerRun, Board_ID, Timestamp) VALUES (?,?,?,?)"
-        self.sqliteCursor.execute(query, [optimizerRunSet, optimizerRun, self.board.boardID, dt.now().strftime('%m/%d/%y %H:%M:%S')])
-        self.sqlConn.commit()
-
-        params_df = pd.DataFrame.from_records(self.params)
-        # params_df.rename(columns={"track_id": "Track_ID", "param": "Param", "value": "InstanceParamValue"})
-        params_df['Board_ID'] = self.board.boardID
-        params_df['OptimizerRunSet'] = optimizerRunSet
-        params_df['OptimizerRun'] = optimizerRun
-
-        # Insert into data table
-        params_l = params_df.values.tolist()
-        paramsQuery_sb = StringIO()
-        paramsQuery_sb.write(
-            "INSERT INTO OptimizerRunTestParams(Track_ID, Param, InstanceParamValue, Board_ID, OptimizerRunSet, OptimizerRun) values(?,?,?,?,?,?)")
-        self.sqliteCursor.execute("BEGIN TRANSACTION")
-        for index, record in params_df.iterrows():
-            self.sqliteCursor.execute(paramsQuery_sb.getvalue(), [record['track_id'], record['param'],
-                                                                  record['value'], record['Board_ID'],
-                                                                  record['OptimizerRunSet'],record['OptimizerRun']])
-        self.sqliteCursor.execute("END TRANSACTION")
-
-        self.sqlConn.commit()
-        paramsQuery_sb.close()
+        with contextlib.closing(sql.connect('etc/Optimizer.db')) as sqlConn:
+            with sqlConn:
+                with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
+                    query = "INSERT INTO OptimizerRuns (OptimizerRunSet, OptimizerRun, Board_ID, Timestamp) VALUES (?,?,?,?)"
+                    sqliteCursor.execute(query, [optimizerRunSet, optimizerRun, self.board.boardID, dt.now().strftime('%m/%d/%y %H:%M:%S')])
+                    sqlConn.commit()
+            
+                    params_df = pd.DataFrame.from_records(self.params)
+                    # params_df.rename(columns={"track_id": "Track_ID", "param": "Param", "value": "InstanceParamValue"})
+                    params_df['Board_ID'] = self.board.boardID
+                    params_df['OptimizerRunSet'] = optimizerRunSet
+                    params_df['OptimizerRun'] = optimizerRun
+            
+                    # Insert into data table
+                    params_l = params_df.values.tolist()
+                    paramsQuery_sb = StringIO()
+                    paramsQuery_sb.write(
+                        "INSERT INTO OptimizerRunTestParams(Track_ID, Param, InstanceParamValue, Board_ID, OptimizerRunSet, OptimizerRun) values(?,?,?,?,?,?)")
+                    sqliteCursor.execute("BEGIN TRANSACTION")
+                    for index, record in params_df.iterrows():
+                        sqliteCursor.execute(paramsQuery_sb.getvalue(), [record['track_id'], record['param'],
+                                                                              record['value'], record['Board_ID'],
+                                                                              record['OptimizerRunSet'],record['OptimizerRun']])
+                    sqliteCursor.execute("END TRANSACTION")
+            
+                    sqlConn.commit()
+                    paramsQuery_sb.close()
 
     def tempWriteMetricsToDb(self, evaluator):
+        with contextlib.closing(sql.connect('etc/Optimizer.db')) as sqlConn:
+            with sqlConn:
+                with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
 
-        # Input metric info
-        metrics_df = pd.DataFrame.from_records(evaluator.results)
-        metrics_df.drop(['Weighting', 'ResultValueIterative'], axis=1, inplace=True)
-        metrics_df['OptimizerRunSet'] = evaluator.optimizerRunSet
-        metrics_df['OptimizerRun'] = evaluator.optimizerRun
-        metrics_df['Board_ID'] = evaluator.board.boardID
+                    # Input metric info
+                    metrics_df = pd.DataFrame.from_records(evaluator.results)
+                    metrics_df.drop(['Weighting', 'ResultValueIterative'], axis=1, inplace=True)
+                    metrics_df['OptimizerRunSet'] = evaluator.optimizerRunSet
+                    metrics_df['OptimizerRun'] = evaluator.optimizerRun
+                    metrics_df['Board_ID'] = evaluator.board.boardID
 
-        # Insert into data table
-        metrics_l = metrics_df.values.tolist()
-        metricsQuery_sb = StringIO()
-        metricsQuery_sb.write("INSERT INTO OptimizerRunResults (")
-        cols = metrics_df.columns.values.tolist()
-        for c in range(0, len(cols) - 1):
-            metricsQuery_sb.write(cols[c])
-            metricsQuery_sb.write(", ")
-        metricsQuery_sb.write(cols[len(cols) - 1])
-        metricsQuery_sb.write(") VALUES (")
-        metricsQuery_sb.write(", ".join(['?'] * len(cols)))
-        metricsQuery_sb.write(")")
-        self.sqliteCursor.execute("BEGIN TRANSACTION")
-        # self.sqliteCursor.execute("select * from  Testtest")
-        for index, record in metrics_df.iterrows():
-            self.sqliteCursor.execute(metricsQuery_sb.getvalue(), [record['Result'], record['ResultFlavour'], record['ResultValue'],
-                                         record['OptimizerRunSet'], record['OptimizerRun'], record['Board_ID']])
+                    # Insert into data table
+                    metrics_l = metrics_df.values.tolist()
+                    metricsQuery_sb = StringIO()
+                    metricsQuery_sb.write("INSERT INTO OptimizerRunResults (")
+                    cols = metrics_df.columns.values.tolist()
+                    for c in range(0, len(cols) - 1):
+                        metricsQuery_sb.write(cols[c])
+                        metricsQuery_sb.write(", ")
+                    metricsQuery_sb.write(cols[len(cols) - 1])
+                    metricsQuery_sb.write(") VALUES (")
+                    metricsQuery_sb.write(", ".join(['?'] * len(cols)))
+                    metricsQuery_sb.write(")")
+                    sqliteCursor.execute("BEGIN TRANSACTION")
+                    # sqliteCursor.execute("select * from  Testtest")
+                    for index, record in metrics_df.iterrows():
+                        sqliteCursor.execute(metricsQuery_sb.getvalue(), [record['Result'], record['ResultFlavour'], record['ResultValue'],
+                                                     record['OptimizerRunSet'], record['OptimizerRun'], record['Board_ID']])
 
-        self.sqliteCursor.execute("END TRANSACTION")
-        # sqliteCursor.executemany(metricsQuery_sb.getvalue(), metrics_df)
-        self.sqlConn.commit()
-        metricsQuery_sb.close()
+                    sqliteCursor.execute("END TRANSACTION")
+                    # sqliteCursor.executemany(metricsQuery_sb.getvalue(), metrics_df)
+                    sqlConn.commit()
+                    metricsQuery_sb.close()
 
     def tempWriteEvents(self, stats, optimizerRunSet, optimizerRun):
-        # Cache events hit in db
-        eventshit_df = pd.DataFrame.from_records([m.to_dict() for m in stats.moves if m.ladderorchuteamt != 0])
-        query = "INSERT INTO EventHit Values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        self.sqliteCursor.execute("BEGIN TRANSACTION")
-        for idx, move in eventshit_df.iterrows():
-            self.sqliteCursor.execute(query, (optimizerRunSet, optimizerRun, self.board.boardID,
-                                         move['trial'], move['track_id'], move['threadnum'],move['movenum'],
-                                         move['currpos'] - move['score'] + move['basescore'], move['currpos'],
-                                         move['score'] - move['basescore']))
+        with contextlib.closing(sql.connect('etc/Optimizer.db')) as sqlConn:
+            with sqlConn:
+                with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
+                    # Cache events hit in db
+                    eventshit_df = pd.DataFrame.from_records([m.to_dict() for m in stats.moves if m.ladderorchuteamt != 0])
+                    query = "INSERT INTO EventHit Values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                    sqliteCursor.execute("BEGIN TRANSACTION")
+                    for idx, move in eventshit_df.iterrows():
+                        sqliteCursor.execute(query, (optimizerRunSet, optimizerRun, self.board.boardID,
+                                                     move['trial'], move['track_id'], move['threadnum'],move['movenum'],
+                                                     move['currpos'] - move['score'] + move['basescore'], move['currpos'],
+                                                     move['score'] - move['basescore']))
 
-        self.sqliteCursor.execute("END TRANSACTION")
-        self.sqlConn.commit()
+                    sqliteCursor.execute("END TRANSACTION")
+                    sqlConn.commit()
 
     def modParamsForFmin(self, paramsSubset, fminParamsList):
         allParams_df = pd.DataFrame.from_records(self.params)
