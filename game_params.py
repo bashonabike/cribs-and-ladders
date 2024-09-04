@@ -16,7 +16,7 @@ from scipy.stats import norm
 
 #YOU CAN CHANGE THESE VALUES:
 
-twodecks = True
+twodecks = False
 numplayers = 3
 #Set to None if all tracks, otherwise tracks are 1 starting, enter list of ints
 tracksused = None
@@ -56,7 +56,7 @@ maxeventsettrials = 100
 maxitersconvergeoneventtrialset = 200
 maxitertrynewbuild = 50
 maxitertrackstalled = 20
-minqualityboardlengthmatching = 4 #Try to get within 4 holes of ideal
+minqualityboardlengthmatching = 20 #Try to get within 6 holes of ideal
 minqualityboardlengthintervalsrpt = 0.02
 
 #OPTIMIZER BALANCING PARAMS
@@ -85,7 +85,7 @@ optmultispct = 0.05
 ##################################################################################################
 #Iterative optimizer params
 changepctperiteration = 0.01
-iterscorecutoff = 7
+iterscorecutoff = 100
 
 
 

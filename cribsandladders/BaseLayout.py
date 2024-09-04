@@ -39,15 +39,19 @@ def svgParserHoles(svgFilePath, boardHeight = -1, tracknum = -1, returnRawCoords
     holes = []
     allcoords = []
     holenum = 0
+    omitFirst = False
     if boardHeight == -1:
         for svg in board_xml_file.getElementsByTagName('svg'):
             boardHeight = float(svg.getAttribute('height').replace("mm", ""))
             break
-
     for svg_path in board_xml_file.getElementsByTagName('path'):
+        if not omitFirst:
+            omitFirst = True
+            continue
         coords = [float(c) for c in svg_path.getAttribute('d').split()[1].split(",")]
         allcoords.append((coords[0],boardHeight-coords[1]))
         #Flip y axis so cartesian coords
+
     #Reverse if line is in reverse dir
     if allcoords[0][0] > allcoords[len(holes)-1][0]: allcoords =  list(reversed(allcoords))
 

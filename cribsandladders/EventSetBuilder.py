@@ -97,7 +97,7 @@ class EventSetBuilder:
                     "Passed max # iters ({}) to find an event set.  ".format(gp.maxitertrynewbuild) +
                     "This board may not be feasible.  Try adding more folds in the tracks")
         self.buildSetIntoEvents()
-        # self.plot_coordinates_and_vectors()
+        #self.plot_coordinates_and_vectors()
 
 
     def setParamsIntoDb(self,optimizerRunSet, optimizerRun ):
@@ -350,8 +350,11 @@ class EventSetBuilder:
 
         #Figure out length of partial game
         movesAllTrials = 0
-        if overrideIters < 0: iters = gp.probminimodeliters
-        else: iters = overrideIters
+        if overrideIters < 0:
+            iters = gp.probminimodeliters
+        else:
+            iters = overrideIters
+            partialTrackEnd = trackActualLength
 
         for trial in range(iters):
             #Set up trial gameplay
@@ -1163,8 +1166,8 @@ class EventSetBuilder:
                 if newVal > 0.95: newVal = 0.95
                 elif newVal < 0.05: newVal = 0.05
                 self.paramSet.tryModParam(l['track_id'], "balanceandefflengthcontrolfactor", newVal)
-                print("Retry, not good enough board eff length quality\n")
 
+            print("Retry, not good enough board eff length quality\n")
             return False
 
 
@@ -1254,7 +1257,6 @@ class EventSetBuilder:
             t.setEventImpedance()
 
 
-
     def plot_coordinates_and_vectors(self, bitmap_name='output_bitmap.png'):
         """
         Plots multiple sets of coordinates and vectors, and saves the plot as a bitmap image.
@@ -1266,12 +1268,16 @@ class EventSetBuilder:
         """
 
 
-        plt.figure(figsize=(30, 15))
+        plt.figure(figsize=(20, 20))
         coordinate_sets = []
+        path_dot_vectors = []
         vector_sets = []
         x_marks = []
         for t in self.board.tracks:
-            coordinate_sets.append([h.coords for h in t.trackholes])
+            holes = [h.coords for h in t.trackholes]
+            coordinate_sets.append(holes)
+            for c_idx in range(len(holes) - 1):
+                path_dot_vectors.append((holes[c_idx], holes[c_idx+1]))
             trackVectorSet = []
             for l, ch in zip([True, True, False], [True, False, True]):
                 trackVectorSubset = []
@@ -1300,6 +1306,12 @@ class EventSetBuilder:
         for coordinates in coordinate_sets:
             x_coords, y_coords = zip(*coordinates)
             plt.scatter(x_coords, y_coords, marker='o')
+
+        # Plot tracks in fine dots
+        for vector in path_dot_vectors:
+            x_values = [vector[0][0], vector[1][0]]
+            y_values = [vector[0][1], vector[1][1]]
+            plt.plot(x_values, y_values, linestyle=':', color='black', linewidth=1)
 
         #Plot lumps for cannot enter
         lumps = []

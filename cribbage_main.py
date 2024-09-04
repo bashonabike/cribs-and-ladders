@@ -3,6 +3,7 @@ from cribsandladders.Player import Player
 from cribsandladders.CribbageGame import CribbageGame
 from cribsandladders.Board import Board
 from cribsandladders.CribSquad import CribSquad
+import cribsandladders.DXFWriter as dxf
 import os
 import game_params as gp
 import cribsandladders.Stats as crst
@@ -149,14 +150,14 @@ class Routines:
         self.eventSetBuilder.paramSet.tempWriteMetricsToDb(eval)
         return self.optimizer.detWeighedScoring(eval.results)
 
-    def setUpBoard(self):
+    def setUpBoard(self, homoRisk = False):
         self.board = Board()
         bstr.setBoardFromDb(self.board, gp.boardname)
         self.board.setBoardAfterSetter()
         self.posevents = ps.PossibleEvents(self.board)
         self.eventSetBuilder = op.EventSetBuilder(self.board, self.posevents)
         self.optimizer = opt.Optimizer(self.board, self.optimizerRunSet)
-        self.squad = CribSquad(self.rankLookupTable, self.board.tracks, tracksUsed=gp.tracksused)
+        self.squad = CribSquad(self.rankLookupTable, self.board.tracks, tracksUsed=gp.tracksused, homoRisk=homoRisk)
 
     def runNormalCribGame(self, debug=False):
         self.board = Board()
@@ -194,10 +195,6 @@ class Routines:
             self.run_trials(self.board, self.squad, stats, debug)
             eval = evl.Evaluator(self.eventSetBuilder, self.board, self.posevents, stats, sqlOptimizerCon,
                                  self.optimizerRunSet, self.optimizerRun)
-
-
-
-
             eval.detMetrics()
             eval.writeMetricsToDb()
             self.eventSetBuilder.paramSet.tempWriteMetricsToDb(eval)
@@ -214,6 +211,7 @@ class Routines:
                                                       self.optimizerRunSet, self.optimizerRun)
 
         sqlOptimizerCon.close()
+        dxf.buildDXFFile(self.board)
         return self.optimizer.bestPostIterParams
 
 
@@ -238,8 +236,8 @@ if __name__ == "__main__":
 
 
 
-    routines.setUpBoard()
-    bestIterParams = routines.runIter(debug=False)
+    routines.setUpBoard(homoRisk = True)
+    bestIterParams = routines.runIter(debug=True)
     print(bestIterParams)
-    bestFminParams = routines.runFmin()
-    print(bestFminParams)
+    # bestFminParams = routines.runFmin()
+    # print(bestFminParams)

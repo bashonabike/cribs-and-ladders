@@ -4,20 +4,24 @@ import os
 import random as r
 
 class CribSquad:
-    def __init__(self, rankLookupTable, tracks, tracksUsed = None):
+    def __init__(self, rankLookupTable, tracks, tracksUsed = None, homoRisk = False):
         self.players = []
         self.tracksUsed = tracksUsed
+        self.homoRisk = homoRisk
         if self.tracksUsed is None or len(self.tracksUsed) != gp.numplayers:
             self.tracksUsed = []
             for p in range(gp.numplayers):
                 if len(tracks) in (0,1): self.tracksUsed.append(0)
                 else: self.tracksUsed.append(tracks[p].num)
         for i in range(0,gp.numplayers):
-            (self.players.append(pl.Player(r.randint(1,21), i + 1, rankLookupTable, self.tracksUsed[i])))
+            if homoRisk: risk = 11
+            else: risk = r.randint(1,21)
+            (self.players.append(pl.Player(risk, i + 1, rankLookupTable, self.tracksUsed[i])))
 
     def resetRisks(self):
         for player in self.players:
-            player.risk = r.randint(1,21)
+            if self.homoRisk: player.risk = 11
+            else: player.risk = r.randint(1,21)
 
     def resetCanPlay(self):
         for player in self.players:
