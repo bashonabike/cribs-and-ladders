@@ -534,7 +534,6 @@ class PossibleEvents:
         Returns:
             True if intersects found, False if none found
         """
-
         for vector1 in test_path_set:
             for vector2 in possible_intercepts_set:
                 if not postGenTest and (vector1[0] == vector2[0] or vector1[0] == vector2[1] or
@@ -959,6 +958,12 @@ class PossibleEvents:
         max_x = max(x_coords)
         min_y = min(y_coords)
         max_y = max(y_coords)
+
+        #Increase by 10 for safety
+        min_x -= 10
+        max_x += 10
+        min_y -= 10
+        max_y += 10
 
         # Define the corners of the bounding box
         bottom_left = (min_x, min_y)

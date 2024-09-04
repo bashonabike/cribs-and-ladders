@@ -237,7 +237,7 @@ if __name__ == "__main__":
 
 
     routines.setUpBoard(homoRisk = True)
-    bestIterParams = routines.runIter(debug=True)
+    bestIterParams = routines.runIter(debug=False)
     print(bestIterParams)
     # bestFminParams = routines.runFmin()
     # print(bestFminParams)

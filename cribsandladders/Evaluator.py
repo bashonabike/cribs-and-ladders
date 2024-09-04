@@ -125,7 +125,7 @@ class Evaluator:
 
         #Balance
         self.results.append(dict(Result="balance", ResultFlavour="GAMEPLAY SCALAR STATS",
-                                 ResultValue=stt.stdev([b[1] for b in self.stats.partialBalanceSet]), Weighting=30))
+                                 ResultValue=stt.stdev([b[1] for b in self.stats.partialBalanceSet]), Weighting=0))
         for b in self.stats.partialBalanceSet:
             track_id = self.board.getTrackByNum(b[0]).Track_ID
             self.results.append(dict(Result="balance_T{}".format(track_id), ResultFlavour="GAMEPLAY SCALAR STATS",
@@ -138,7 +138,7 @@ class Evaluator:
         else: gamelengthstatit = 1
 
         self.results.append(dict(Result="gamelength", ResultFlavour="GAMEPLAY SCALAR STATS",
-                                 ResultValue=abs(gamelengthstatit), ResultValueIterative=gamelengthstatit, Weighting=4))
+                                 ResultValue=abs(gamelengthstatit), ResultValueIterative=gamelengthstatit, Weighting=0))
 
         #Calculate two-hits
         trackNumChecks = []
@@ -162,7 +162,7 @@ class Evaluator:
             twohitsstatit = len(twoHits)/len(self.moves) - gp.opttwohitspct
         else: twohitsstatit = 1
         self.results.append(dict(Result="twohits", ResultFlavour="GAMEPLAY SCALAR STATS",
-                                 ResultValue=abs(twohitsstatit), ResultValueIterative=twohitsstatit, Weighting=0.5))
+                                 ResultValue=abs(twohitsstatit), ResultValueIterative=twohitsstatit, Weighting=50))
 
         #Calculate so-excites (maximize)
         self.results.append(dict(Result="soexcite", ResultFlavour="GAMEPLAY SCALAR STATS",
@@ -172,7 +172,7 @@ class Evaluator:
         #Calculate repeats (minimize)
         self.results.append(dict(Result="repeats", ResultFlavour="GAMEPLAY SCALAR STATS",
                                  ResultValue=self.stats.repeats/len(self.moves) if len(self.moves) > 0 else 1,
-                                 Weighting=20))
+                                 Weighting=400))
 
         #GAMEPLAY STATISTICAL STATS (lol)
         moves_df = pd.DataFrame.from_records([dict(movenum=m.movenum, trial=m.trial) for m in self.moves])

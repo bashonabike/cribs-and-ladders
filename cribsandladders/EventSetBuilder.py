@@ -97,6 +97,9 @@ class EventSetBuilder:
         self.paramSet.tempInsertParamsDb(optimizerRunSet, optimizerRun)
         builditer = 0
         while not self.tryEventSet(self.paramSet):
+            #TEMPPPP
+            # self.buildSetIntoEvents()
+            # self.plot_coordinates_and_vectors()
             builditer += 1
             if builditer > gp.maxitertrynewbuild:
                 raise Exception(
@@ -554,6 +557,8 @@ class EventSetBuilder:
         baselinePartialLength, sequencesOfMoves = self.runPartialTrackEffLengthHoles(t['track_id'],
                                                                                      t['eventsetbuild'], t['tracklength'],
                                                                                      readMode=True)
+        #Adjust baseline as per control length
+        baselinePartialLength *= t['tracklength']/t['controllength']
         eventFitnesses = []
         explicitEventCounter = 0
         while ((explicitEvent is not None and explicitEventCounter < 1) or
@@ -614,7 +619,8 @@ class EventSetBuilder:
                 t['candcursor'] += 1
                 continue
 
-            # #Check for two-hits
+            #Check for two-hits
+
             # boostsIfChute, impedersIfChute, boostsIfLadder, impedersIfLadder = [],[],[],[]
             # curEventLength = candEventSpecs['length']
             #
@@ -636,7 +642,7 @@ class EventSetBuilder:
             #                                                twohitboosts, ladderTops, selfScaleLength=curEventLength))
             #     boostsIfLadder.extend(self.getEffectorsForDisps(candEventSpecs['eventbase'], (-1,-2,-4),
             #                                                twohitboosts, chuteBases, selfScaleLength=curEventLength))
-            #
+
             # allModsIfChute = boostsIfChute + impedersIfChute
             # allModsIfLadder = boostsIfLadder + impedersIfLadder
 
@@ -707,6 +713,8 @@ class EventSetBuilder:
                                                                                              candEventSpecs['event'].startHole.num),
                                                                                readMode=True)[0]
 
+                # Adjust length as per control length
+                effLengthForecast *= t['tracklength']/t['controllength']
                 #NOTE: impeders are (-), boosters are (+)
                 effCompModulation = effLengthForecast - baselinePartialLength
                 # print(str(effCompModulation))
@@ -717,14 +725,49 @@ class EventSetBuilder:
                 #     effEnergyModulation += sum([m['scaledenergymod'] for m in modsForType])
 
                 #BASE SCORE ON BLEND MOD + ENERGY
-                # curScore = 0.3*abs(effEnergy - t['energybuffer'])/abs(t['energybuffer']) + 0.7* 10*pow(abs(t['compensationbuffer'] + effCompModulation)/abs(t['compensationbuffer']), 4)
                 if abs(t['compensationbuffer'] + effCompModulation) < abs(t['compensationbuffer']):
-                    curScore =0.1
+                    curScore = 10*(1.0 - abs(effCompModulation)/abs(t['compensationbuffer']))
                 elif abs(t['compensationbuffer'] + effCompModulation) > abs(t['compensationbuffer']):
-                    curScore = 10
+                    curScore = 10*(1.0 + 10*abs(effCompModulation)/abs(t['compensationbuffer']))
                 else:
-                    curScore = 1
+                    curScore = 10
+
+                curScore *= 0.5*abs(effEnergy - t['energybuffer'])
                 effNetEnergy = effEnergy + abs(effCompModulation)
+
+                #NOTE: longer balanceandefflengthcontrolfactor for longer route
+                balFactor = params.tryGetParam(t['track_id'], 'balanceandefflengthcontrolfactor')
+                if instType == en.InstanceEventType.CHUTEONLY and balFactor > 0.5:
+                    curScore *= (1.0 - balFactor)/0.5
+                elif instType == en.InstanceEventType.LADDERONLY and balFactor < 0.5:
+                    curScore *= balFactor/0.5
+
+                # Check for two-hits
+                numTwoHits = 0
+                if instType in (en.InstanceEventType.LADDERONLY, en.InstanceEventType.CHUTEANDLADDER):
+                    for p in (1, 2 ,4):
+                        if self.searchOrderedListForVal(ladderBases, candEventSpecs['event'].endHole.num + p) > -1:
+                            numTwoHits += 1
+                        if self.searchOrderedListForVal(chuteTops, candEventSpecs['event'].endHole.num + p) > -1:
+                            numTwoHits += 1
+                    for p in (-1, -2 ,-4):
+                        if self.searchOrderedListForVal(ladderTops, candEventSpecs['event'].startHole.num + p) > -1:
+                            numTwoHits += 1
+                        if self.searchOrderedListForVal(chuteBases, candEventSpecs['event'].startHole.num + p) > -1:
+                            numTwoHits += 1
+                if instType in (en.InstanceEventType.CHUTEONLY, en.InstanceEventType.CHUTEANDLADDER):
+                    for p in (1, 2, 4):
+                        if self.searchOrderedListForVal(ladderBases, candEventSpecs['event'].startHole.num + p) > -1:
+                            numTwoHits += 1
+                        if self.searchOrderedListForVal(chuteTops, candEventSpecs['event'].startHole.num + p) > -1:
+                            numTwoHits += 1
+                    for p in (-1, -2, -4):
+                        if self.searchOrderedListForVal(ladderTops, candEventSpecs['event'].endHole.num + p) > -1:
+                            numTwoHits += 1
+                        if self.searchOrderedListForVal(chuteBases, candEventSpecs['event'].endHole.num + p) > -1:
+                            numTwoHits += 1
+                curScore *= (1.0 + numTwoHits*params.tryGetParam(t['track_id'], 'twohitfreqimpedance'))
+
 
                 #Adjust score based on direction of effCompModulation (trying to get to 0)
                 #Again, boosters are (+) and vice versa, so we attempt negation
@@ -745,7 +788,6 @@ class EventSetBuilder:
                 #         #Punish
                 #         curScore /= effControlFactor
 
-                #TODO: re-factor in twohitimpedanceeffector, maybe just via a count, incl twohits dict item in cand etc
 
                 # #Boost score for each allowable 2-hit, factoring in two-hit impedance
                 # for m in modsForType:
@@ -789,7 +831,7 @@ class EventSetBuilder:
 
                 #Add event score to output list
                 # if tempp: print("Score after hist & cancel mods: {}".format(curScore))
-                print("{} {}".format(instType, curScore))
+                # print("{} {}".format(instType, curScore))
                 eventFitnesses.append(dict(event=candEventSpecs['event'],
                                            eventspecs=candEventSpecs,
                                            score=curScore, effnetenergy=effNetEnergy, effcompmodulation=effCompModulation,
@@ -1019,7 +1061,7 @@ class EventSetBuilder:
                                     eventnodes=[],twohitsthusfar=0,cancels=0,eventscount=0,
                                     ladderbases=[], laddertops=[], holescompletepct=0.0, chutescompletepct=0.0, curhole=0,
                                     compensationbuffer = 0.0, trackstalledcounter=0, trackisstalled=False,
-                                    multistack=[])
+                                    multistack=[], controllength = 0)
                           for t in self.board.tracks]
 
         #Load benchmarks
@@ -1052,6 +1094,11 @@ class EventSetBuilder:
         #Iterate over tracks, create event when energy buildup exceeds req
 
         for t in trackEventsOverview:
+            #Determine control lengths with blank track
+            t['controllength'] = self.runPartialTrackEffLengthHoles(t['track_id'], [],
+                                                                                t['tracklength'],
+                                                                                     readMode=True)[0]
+
             # Create track-specific energy curve
             candEventSpecs = [dict(event=c, isshared=c.isShared, eventtop=c.endHole.num, eventbase=c.startHole.num,
                                    length=c.length,
@@ -1261,7 +1308,7 @@ class EventSetBuilder:
             effLengths.append(dict(trackeventoverview=t, track_id=t['track_id'],
                                    efflength=self.runPartialTrackEffLengthHoles(t['track_id'], t['eventsetbuild'],
                                                                                 t['tracklength'],
-                                                                                     readMode=True)[0]))
+                                                                                     readMode=True)[0]* (t['tracklength']/t['controllength'])))
             sortedNodes = t['eventnodes']
             sortedNodes.sort()
             self.eventNodesByTrack.append(dict(tracknum=t['tracknum'], nodes=sortedNodes))
@@ -1277,6 +1324,7 @@ class EventSetBuilder:
         if (sum([abs(l['efflength'] - gp.effectiveboardlength) for l in effLengths])/len(effLengths)
                 > gp.minqualityboardlengthmatching):
             #Massage balanceandefflengthcontrolfactor and retry
+            #Longer balanceandefflengthcontrolfactor for longer route
             for l in effLengths:
                 oldVal = self.paramSet.tryGetParam(l['track_id'], "balanceandefflengthcontrolfactor")
                 newVal = oldVal
