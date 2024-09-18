@@ -47,17 +47,19 @@ maxladderlength = 20
 eventminspacing = 5 #mm
 maxeventlineext = 100
 mincrowvectordistcancel = 12 #mm, since straight line approx this equates to ~15mm curvy, need room to discernibly add lump on 1 side
-whenstartworryingaboutcancels = 6 #After this many cancels on a track, start impeding
+whenstartworryingaboutcancels = 3 #After this many cancels on a track, start impeding
 probminimodeliters = 200
+allowabletwohits = 1
+randomfeatheringamount = 8 #Nix holes randomly at nth interval to avoid endless opt loops
 
 #OPTIMIZER BOUNDING PARAMS
 maxeventsetfinesseiters = 10
 maxeventsettrials = 100
 maxitersconvergeoneventtrialset = 200
-maxitertrynewbuild = 50
+maxitertrynewbuild = 200
 maxitertrackstalled = 20
-minqualityboardlengthmatching = 1 #Try to get within this many holes of ideal
-minqualityboardlengthintervalsrpt = 0.05
+minqualityboardlengthmatching = 3 #Try to get within this many holes of ideal
+minqualityboardlengthintervalsrpt = 0.02
 
 #OPTIMIZER BALANCING PARAMS
 #NOTE: changing these will require code changes!!!
@@ -75,7 +77,7 @@ trainnumestimators_bnds=(50, 300, True)
 ####################################################################################
 #EVALUATOR PARAMS
 idealgamelength = 12
-opttwohitspct = 0.1
+opttwohitspct = 0.01
 optorthospct = 0.2
 optmultispct = 0.05
 

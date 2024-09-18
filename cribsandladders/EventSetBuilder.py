@@ -106,7 +106,7 @@ class EventSetBuilder:
                     "Passed max # iters ({}) to find an event set.  ".format(gp.maxitertrynewbuild) +
                     "This board may not be feasible.  Try adding more folds in the tracks")
         self.buildSetIntoEvents()
-        #self.plot_coordinates_and_vectors()
+        # self.plot_coordinates_and_vectors()
 
 
     def setParamsIntoDb(self,optimizerRunSet, optimizerRun ):
@@ -732,7 +732,7 @@ class EventSetBuilder:
                 else:
                     curScore = 10
 
-                curScore *= 0.5*abs(effEnergy - t['energybuffer'])
+                curScore *= 0.8*abs(effEnergy - t['energybuffer'])
                 effNetEnergy = effEnergy + abs(effCompModulation)
 
                 #NOTE: longer balanceandefflengthcontrolfactor for longer route
@@ -741,32 +741,50 @@ class EventSetBuilder:
                     curScore *= (1.0 - balFactor)/0.5
                 elif instType == en.InstanceEventType.LADDERONLY and balFactor < 0.5:
                     curScore *= balFactor/0.5
+                elif instType == en.InstanceEventType.LADDERONLY and balFactor > 0.5:
+                    curScore /= (1.0 - balFactor)/0.5
+                elif instType == en.InstanceEventType.CHUTEONLY and balFactor < 0.5:
+                    curScore /= balFactor/0.5
 
                 # Check for two-hits
                 numTwoHits = 0
+                numTwoHitsLoose = 0
                 if instType in (en.InstanceEventType.LADDERONLY, en.InstanceEventType.CHUTEANDLADDER):
                     for p in (1, 2 ,4):
                         if self.searchOrderedListForVal(ladderBases, candEventSpecs['event'].endHole.num + p) > -1:
-                            numTwoHits += 1
+                            if abs(p) == 4: numTwoHitsLoose += 1
+                            else: numTwoHits += 1
                         if self.searchOrderedListForVal(chuteTops, candEventSpecs['event'].endHole.num + p) > -1:
-                            numTwoHits += 1
+                            if abs(p) == 4: numTwoHitsLoose += 1
+                            else: numTwoHits += 1
                     for p in (-1, -2 ,-4):
                         if self.searchOrderedListForVal(ladderTops, candEventSpecs['event'].startHole.num + p) > -1:
-                            numTwoHits += 1
+                            if abs(p) == 4: numTwoHitsLoose += 1
+                            else: numTwoHits += 1
                         if self.searchOrderedListForVal(chuteBases, candEventSpecs['event'].startHole.num + p) > -1:
-                            numTwoHits += 1
+                            if abs(p) == 4: numTwoHitsLoose += 1
+                            else: numTwoHits += 1
                 if instType in (en.InstanceEventType.CHUTEONLY, en.InstanceEventType.CHUTEANDLADDER):
                     for p in (1, 2, 4):
                         if self.searchOrderedListForVal(ladderBases, candEventSpecs['event'].startHole.num + p) > -1:
-                            numTwoHits += 1
+                            if abs(p) == 4: numTwoHitsLoose += 1
+                            else: numTwoHits += 1
                         if self.searchOrderedListForVal(chuteTops, candEventSpecs['event'].startHole.num + p) > -1:
-                            numTwoHits += 1
+                            if abs(p) == 4: numTwoHitsLoose += 1
+                            else: numTwoHits += 1
                     for p in (-1, -2, -4):
                         if self.searchOrderedListForVal(ladderTops, candEventSpecs['event'].endHole.num + p) > -1:
-                            numTwoHits += 1
+                            if abs(p) == 4: numTwoHitsLoose += 1
+                            else: numTwoHits += 1
                         if self.searchOrderedListForVal(chuteBases, candEventSpecs['event'].endHole.num + p) > -1:
-                            numTwoHits += 1
-                curScore *= (1.0 + numTwoHits*params.tryGetParam(t['track_id'], 'twohitfreqimpedance'))
+                            if abs(p) == 4: numTwoHitsLoose += 1
+                            else: numTwoHits += 1
+
+                if (numTwoHits > 0 and numTwoHits*params.tryGetParam(t['track_id'], 'twohitfreqimpedance') >
+                        (gp.allowabletwohits - t['twohitsthusfar'])):
+                    continue
+                curScore *= (1.0 + (numTwoHits + numTwoHitsLoose/2)*t['twohitsthusfar']*
+                             params.tryGetParam(t['track_id'], 'twohitfreqimpedance'))
 
 
                 #Adjust score based on direction of effCompModulation (trying to get to 0)
@@ -795,6 +813,7 @@ class EventSetBuilder:
 
                 #Impede score if too many ladders/chutes are getting cancelled
                 if instType != en.InstanceEventType.CHUTEANDLADDER and t['cancels'] >= gp.whenstartworryingaboutcancels:
+                    if t['cancels'] >= 2.5*gp.whenstartworryingaboutcancels: continue
                     curScore *= (1.0 + params.tryGetParam(t['track_id'],'cancelimpedance')*(t['cancels'] + 1)
                                  /(t['eventscount'] + 1))
 
@@ -841,8 +860,8 @@ class EventSetBuilder:
                                            instladder=instType in (en.InstanceEventType.CHUTEANDLADDER,
                                                                   en.InstanceEventType.LADDERONLY),
                                            lasteventtop=0
-                                           # ,
-                                           # twohits = len(modsForType)
+                                            ,
+                                            twohits = numTwoHits
                                            ))
 
             t['candcursor'] += 1
@@ -915,6 +934,12 @@ class EventSetBuilder:
         if (t['candcursor'] >= len(t['candeventspecs']) or
                 t['candeventspecs'][t['candcursor']]['eventtop'] != hole.num): return None
 
+        #Omit every 8th or so, feathering to avoid getting stuck in optimizer endless loops
+        if rd.randint(1,gp.randomfeatheringamount) == 1: return None
+
+        #Skip if need to enforce min spacing to flesh out track
+        if t['minspacectr'] < params.tryGetParam(t['track_id'],'enforceminspacing'): return None
+
         # Factor in distribution of spacing histogram to help ensure even distribution of spacings
         prevNode = 0
         if len(t['eventnodes']) > 0:
@@ -949,7 +974,10 @@ class EventSetBuilder:
                         fitness['event'].instanceIncr = orthoInst['incr']
                         fitness['event'].instanceRev = orthoInst['rev']
                     fitness['lasteventtop'] = prevNode
+                    #Score cutoff
+                    # if fitness['score'] < t['chosenscorecutoff']:
                     return fitness
+                    # else: return None
 
         return None
 
@@ -1049,7 +1077,7 @@ class EventSetBuilder:
         trackEventsOverview = [dict(track=t, trackidx = t.num-1, tracknum=t.num, optevents=0, track_id=t.Track_ID,
                                     optfirstchute=0, trackfilled=False, tracklength=len(t.trackholes),
                                     lengthdeviation=(len(t.trackholes)-gp.effectiveboardlength )/gp.effectiveboardlength,
-                                    spacinghisto=[],
+                                    spacinghisto=[], minspacectr=0, #chosenscorecutoff=100,
                                     eventsetbuild=t.eventSetBuild, candeventspecs=[],
                                     lengthdistidealcurve=[], lengthdistactualhist=[],
                                     lengthovertimeideal=[], maxlength=0,
@@ -1181,6 +1209,7 @@ class EventSetBuilder:
                     if len(t['multistack']) == 0:
                         #Find new event
                         t['curhole'] += 1
+                        t['minspacectr'] += 1
                         curHoleObj = t['track'].getHoleByNum(t['curhole'])
                         idealEventWithFitness = self.tryGetEventForHole(curHoleObj, t, allVectorsTest, baseVectorsTest,
                                                                         params, trackEventsOverview)
@@ -1203,6 +1232,8 @@ class EventSetBuilder:
                     if idealEventWithFitness is not None:
                         t['trackstalledcounter'] = 0
                         t['trackisstalled'] = False
+                        t['minspacectr'] = 0
+                        # t['chosenscorecutoff'] = 0.3*idealEventWithFitness['score']*10.0 + 0.7*t['chosenscorecutoff']
                         # if len(allVectorsTest) > 50 and len(allVectorsTest) % 100 <= 5:
                         # if len(allVectorsTest) >  155:
                         #     sdf=""
@@ -1233,7 +1264,7 @@ class EventSetBuilder:
                         t['eventscount'] += 1
 
                         self.updateVectorsTest(allVectorsTest, baseVectorsTest, curEvent, False, isOrtho)
-                        # t['twohitsthusfar'] += idealEventWithFitness['twohits']
+                        t['twohitsthusfar'] += idealEventWithFitness['twohits']
                         if idealEventWithFitness['instchute']:
                             t['chutes'].append(dict(chutetop=idealEventWithFitness['eventspecs']['eventtop'],
                                                      length=idealEventWithFitness['eventspecs']['length']))
@@ -1304,6 +1335,7 @@ class EventSetBuilder:
                 stallCounter = 0
 
         effLengths = []
+        self.eventNodesByTrack = []
         for t in trackEventsOverview:
             effLengths.append(dict(trackeventoverview=t, track_id=t['track_id'],
                                    efflength=self.runPartialTrackEffLengthHoles(t['track_id'], t['eventsetbuild'],
@@ -1312,7 +1344,11 @@ class EventSetBuilder:
             sortedNodes = t['eventnodes']
             sortedNodes.sort()
             self.eventNodesByTrack.append(dict(tracknum=t['tracknum'], nodes=sortedNodes))
-            print(len(t['chutes'])-len(t['ladders']))
+            print("{} chutes, {} ladders, {} events; ctl: {} ltc: {}".format(len(t['chutes']), len(t['ladders']),
+                                                                             len(t['eventsetbuild']),
+                                                                  len(t['chutes'])/ len(t['ladders']),
+                                                                  len(t['ladders'])/ len(t['chutes'])))
+            print("Two hits: {}".format(t['twohitsthusfar']))
 
         avgEffLength = sum(l['efflength'] for l in effLengths)/len(effLengths)
 
@@ -1321,7 +1357,7 @@ class EventSetBuilder:
                   .format(l['track_id'], l['efflength'],
                           (avgEffLength-l['efflength'])/avgEffLength))
 
-        if (sum([abs(l['efflength'] - gp.effectiveboardlength) for l in effLengths])/len(effLengths)
+        if (max([abs(l['efflength'] - gp.effectiveboardlength) for l in effLengths])
                 > gp.minqualityboardlengthmatching):
             #Massage balanceandefflengthcontrolfactor and retry
             #Longer balanceandefflengthcontrolfactor for longer route
@@ -1600,7 +1636,7 @@ class ParamSet:
         # eventspacingdeviationfactor - Higher means more deviation in event spacing
         # eventspacinghistogramscoringfactor - Lower means less weight put upon it, MAX around 0.4 or 0.5!
         # candenergybufferdivider
-        # move1allowanceratio
+        # move1allowanceratio INACTIVE
         # lengthhistogramscoringfactor - Lower means less weight put upon it
         # lengthovertimescoringfactor - Lower means less weight put upon it
         # disallowbelowsetlength - HELLA override! track spec only probs
@@ -1646,8 +1682,8 @@ class ParamSet:
             with sqlConn:
                 with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
                     #Retrieve base values from db
-                    query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID = ?"
-                    sqliteCursor.execute(query, [self.board.boardID, 0])
+                    query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID = ? AND Active = ?"
+                    sqliteCursor.execute(query, [self.board.boardID, 0, 1])
                     boardparamranges_df = pd.DataFrame(sqliteCursor.fetchall(),
                                                       columns=[d[0] for d in sqliteCursor.description])
                     if len(boardparamranges_df) == 0:
@@ -1665,8 +1701,8 @@ class ParamSet:
 
                     for t in self.tracks:
                         # Try to retrieve overrides if exist
-                        query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID = ?"
-                        sqliteCursor.execute(query, [self.board.boardID, t.Track_ID])
+                        query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID = ? AND Active = ?"
+                        sqliteCursor.execute(query, [self.board.boardID, t.Track_ID, 1])
                         trackparamranges_df = pd.concat([pd.DataFrame(sqliteCursor.fetchall(),
                                                           columns=[d[0] for d in sqliteCursor.description]),
                                                          boardparamranges_df])
@@ -1690,8 +1726,8 @@ class ParamSet:
             with sqlConn:
                 with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
                     #Retrieve base values from db
-                    query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID = ?"
-                    sqliteCursor.execute(query, [self.board.boardID, 0])
+                    query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID = ? AND Active = ?"
+                    sqliteCursor.execute(query, [self.board.boardID, 0, 1])
                     boardparamranges_df = pd.DataFrame(sqliteCursor.fetchall(),
                                                       columns=[d[0] for d in sqliteCursor.description])
                     if len(boardparamranges_df) == 0:
@@ -1709,8 +1745,8 @@ class ParamSet:
             
                     for t in self.tracks:
                         # Try to retrieve overrides if exist
-                        query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID = ?"
-                        sqliteCursor.execute(query, [self.board.boardID, t.Track_ID])
+                        query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID = ? AND Active = ?"
+                        sqliteCursor.execute(query, [self.board.boardID, t.Track_ID, 1])
                         trackparamranges_df = pd.concat([pd.DataFrame(sqliteCursor.fetchall(),
                                                           columns=[d[0] for d in sqliteCursor.description]),
                                                          boardparamranges_df])

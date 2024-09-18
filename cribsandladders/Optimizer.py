@@ -39,8 +39,8 @@ class Optimizer:
     def retrieveTrainData(self):
         #Retrieve eligible param settings from db
         boardID = self.board.boardID
-        query = "SELECT Param, MIN(Track_ID) AS Elig_Track_ID FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID >= ? GROUP BY Param"
-        trackparamranges_df = pd.read_sql_query(query, self.sqlConn, params=[self.board.boardID, 0])
+        query = "SELECT Param, MIN(Track_ID) AS Elig_Track_ID FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID >= ? AND Active = ? GROUP BY Param"
+        trackparamranges_df = pd.read_sql_query(query, self.sqlConn, params=[self.board.boardID, 0, 1])
         # self.sqliteCursor.execute(query, [self.board.boardID, 0])
         # trackparamranges_df = pd.DataFrame(self.sqliteCursor.fetchall(),
         #                                               columns=[d[0] for d in self.sqliteCursor.description])
@@ -113,13 +113,13 @@ class Optimizer:
                         )
 
     def retrievePairingsSettings(self):
-        query = "SELECT * FROM OptimizerParamPairings"
-        self.pairings_df = pd.read_sql_query(query, self.sqlConn)
+        query = "SELECT * FROM OptimizerParamPairings WHERE Active = ?"
+        self.pairings_df = pd.read_sql_query(query, self.sqlConn, params=[1])
         self.pairings_df.set_index(['Result'], inplace=True)
         self.pairings_df.sort_index(inplace=True)
 
-        query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID IN(?,?)"
-        self.absoluteBounds = pd.read_sql_query(query, self.sqlConn, params=[self.board.boardID, -1, -2])
+        query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID IN(?,?) AND Active = ?"
+        self.absoluteBounds = pd.read_sql_query(query, self.sqlConn, params=[self.board.boardID, -1, -2, 1])
         self.absoluteBounds.set_index(['Param'], inplace=True)
         self.absoluteBounds.sort_index(inplace=True)
 

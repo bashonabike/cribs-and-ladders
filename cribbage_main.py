@@ -235,7 +235,9 @@ if __name__ == "__main__":
     # routines.runNormalCribGame(debug=False)
 
 
-
+#TODO: dxf sep layer ramp-ins, sep layer ramp-outs but reverse the vectors!!!
+    #TODO: more seperation between 2 lines for 10 marks
+    #TODO: make nummarks longer too!
     routines.setUpBoard(homoRisk = True)
     bestIterParams = routines.runIter(debug=False)
     print(bestIterParams)

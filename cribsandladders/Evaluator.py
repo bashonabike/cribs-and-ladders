@@ -100,8 +100,15 @@ class Evaluator:
         else:
             cancels = 0
         self.results.append(dict(Result="cancels", ResultFlavour="GAME BOARD STRUCTURE SCALAR STATS",
-                                 ResultValue=cancels, Weighting=6))
+                                 ResultValue=cancels, Weighting=5))
 
+        for n in self.eventSetBuilder.eventNodesByTrack:
+            track = self.board.getTrackByNum(n['tracknum'])
+            track_id = track.Track_ID
+            maxNode = max(n['nodes'])
+            termPct = maxNode/track.length
+            self.results.append(dict(Result="earlytermination_T{}".format(track_id), ResultFlavour="GAMEPLAY SCALAR STATS",
+                                 ResultValue=1.0-termPct, Weighting=8))
 
         #GAME BOARD STRUCTURE STATISTIC STATS
 
@@ -123,16 +130,16 @@ class Evaluator:
 
         #GAMEPLAY SCALAR STATS
 
-        #Balance
+        #Balance OMITING FROM EVAL SINCE DEALT W/ IN SETTER
         self.results.append(dict(Result="balance", ResultFlavour="GAMEPLAY SCALAR STATS",
                                  ResultValue=stt.stdev([b[1] for b in self.stats.partialBalanceSet]), Weighting=0))
         for b in self.stats.partialBalanceSet:
             track_id = self.board.getTrackByNum(b[0]).Track_ID
             self.results.append(dict(Result="balance_T{}".format(track_id), ResultFlavour="GAMEPLAY SCALAR STATS",
-                                 ResultValue=b[1], Weighting=30))
+                                 ResultValue=b[1], Weighting=0))
 
 
-        #Game length
+        #Game length OMITING FROM EVAL SINCE DEALT W/ IN SETTER
         if gp.idealgamelength > 0:
             gamelengthstatit = (self.stats.avglengthinrounds - gp.idealgamelength)/gp.idealgamelength
         else: gamelengthstatit = 1
@@ -162,7 +169,7 @@ class Evaluator:
             twohitsstatit = len(twoHits)/len(self.moves) - gp.opttwohitspct
         else: twohitsstatit = 1
         self.results.append(dict(Result="twohits", ResultFlavour="GAMEPLAY SCALAR STATS",
-                                 ResultValue=abs(twohitsstatit), ResultValueIterative=twohitsstatit, Weighting=50))
+                                 ResultValue=abs(twohitsstatit), ResultValueIterative=twohitsstatit, Weighting=30))
 
         #Calculate so-excites (maximize)
         self.results.append(dict(Result="soexcite", ResultFlavour="GAMEPLAY SCALAR STATS",
