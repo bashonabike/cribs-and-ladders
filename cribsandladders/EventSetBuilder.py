@@ -725,10 +725,12 @@ class EventSetBuilder:
                 #     effEnergyModulation += sum([m['scaledenergymod'] for m in modsForType])
 
                 #BASE SCORE ON BLEND MOD + ENERGY
+                compBufDiv = abs(t['compensationbuffer'])
+                if compBufDiv == 0: compBufDiv = 1
                 if abs(t['compensationbuffer'] + effCompModulation) < abs(t['compensationbuffer']):
-                    curScore = 10*(1.0 - abs(effCompModulation)/abs(t['compensationbuffer']))
+                    curScore = 10*(1.0 - abs(effCompModulation)/compBufDiv)
                 elif abs(t['compensationbuffer'] + effCompModulation) > abs(t['compensationbuffer']):
-                    curScore = 10*(1.0 + 10*abs(effCompModulation)/abs(t['compensationbuffer']))
+                    curScore = 10*(1.0 + 10*abs(effCompModulation)/compBufDiv)
                 else:
                     curScore = 10
 

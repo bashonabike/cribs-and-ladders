@@ -27,7 +27,7 @@ numtrials = 1000
 nummaxthreads = 2
 #OPTIONAL run multiple boards in a batch
 batchnum = 1
-boardname = "Meg Bday Trial #3"
+boardname = "Micro Board 2"
 
 #Set if seeking optimal events layout
 findmode = True
@@ -58,7 +58,7 @@ maxeventsettrials = 100
 maxitersconvergeoneventtrialset = 200
 maxitertrynewbuild = 200
 maxitertrackstalled = 20
-minqualityboardlengthmatching = 3 #Try to get within this many holes of ideal
+minqualityboardlengthmatching = 100 #Try to get within this many holes of ideal
 minqualityboardlengthintervalsrpt = 0.02
 
 #OPTIMIZER BALANCING PARAMS
@@ -87,7 +87,7 @@ optmultispct = 0.05
 ##################################################################################################
 #Iterative optimizer params
 changepctperiteration = 0.02
-iterscorecutoff = 6
+iterscorecutoff = 30
 
 
 

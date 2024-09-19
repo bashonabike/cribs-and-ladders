@@ -231,15 +231,10 @@ if __name__ == "__main__":
     # checkBoardBestTrial(1, 807)
     # genTrainSet()
 
-    routines = Routines(optimizerRunSet=1)
+    routines = Routines(optimizerRunSet=2)
     # routines.runNormalCribGame(debug=False)
-
-
-#TODO: dxf sep layer ramp-ins, sep layer ramp-outs but reverse the vectors!!!
-    #TODO: more seperation between 2 lines for 10 marks
-    #TODO: make nummarks longer too!
     routines.setUpBoard(homoRisk = True)
-    bestIterParams = routines.runIter(debug=False)
+    bestIterParams = routines.runIter(debug=True)
     print(bestIterParams)
     # bestFminParams = routines.runFmin()
     # print(bestFminParams)

@@ -17,7 +17,51 @@ def convert_mm_to_in(coordinate_list):
     return [(x / 25.4, y / 25.4) for (x, y) in coordinate_list]
 
 
-def compute_offset_curve(points, offset_distance):
+# Function to calculate Euclidean distance between two points
+def euclidean_distance(coord1, coord2):
+    return np.linalg.norm(np.array(coord1) - np.array(coord2))
+
+
+# Function to remove coordinates from list1 that are too close to any coordinate in list2
+def remove_close_coordinates(list1, list2, threshold=0.125):
+    result = []
+
+    for coord1 in list1:
+        too_close = False
+        for coord2 in list2:
+            if euclidean_distance(coord1, coord2) <= threshold:
+                too_close = True
+                break
+        if not too_close:
+            result.append(coord1)
+
+    return result
+
+
+# Function to calculate the midpoint between two points
+def midpoint(coord1, coord2):
+    return tuple((np.array(coord1) + np.array(coord2)) / 2)
+
+
+# Function to adjust points that are too close by replacing them with their midpoint
+def adjust_close_points(coords, threshold=0.125):
+    modified = coords.copy()  # Copy the original list to avoid modifying it during iteration
+    n = len(modified)
+    i = 0
+
+    while i < n:
+        j = i + 1
+        while j < n:
+            if euclidean_distance(modified[i], modified[j]) <= threshold:
+                mid = midpoint(modified[i], modified[j])
+                modified[i] = mid
+                modified[j] = mid
+            j += 1
+        i += 1
+
+    return modified
+
+def compute_offset_curve(points, offset_distance, proximityThresh):
     # List to store points for the left and right offset curves
     left_curve = []
     right_curve = []
@@ -26,7 +70,11 @@ def compute_offset_curve(points, offset_distance):
     # Loop through each pair of consecutive points on the curve
     for i in range(len(points) - 1):
         # Get two consecutive points
-        p1 = points[i]
+        if i > 0:
+            #use prev point ideally
+            p1 = points[i-1]
+        else:
+            p1 = points[i]
         p2 = points[i + 1]
 
         # Compute the direction vector (from p1 to p2)
@@ -42,13 +90,27 @@ def compute_offset_curve(points, offset_distance):
         perp_vector *= offset_distance
 
         # Compute the points for the left and right offset curves
-        left_curve.append((p1 + perp_vector).tolist())
-        right_curve.append((p1 - perp_vector).tolist())
+        left_curve.append((points[i] + perp_vector).tolist())
+        right_curve.append((points[i] - perp_vector).tolist())
 
     # Add the last point offsets (for the endpoint of the curve)
     last_perp_vector = np.array([-direction_vector[1], direction_vector[0]]) * offset_distance
     left_curve.append((points[-1] + last_perp_vector).tolist())
     right_curve.append((points[-1] - last_perp_vector).tolist())
+
+    #Check proximity to holes, if too close remove outright
+    left_curve = remove_close_coordinates(left_curve, points, threshold=proximityThresh)
+    right_curve = remove_close_coordinates(right_curve, points, threshold=proximityThresh)
+
+    #Check proximity to neighbours, if too close set each to midpoint of each other
+    left_curve = adjust_close_points(left_curve, threshold=proximityThresh)
+    right_curve = adjust_close_points(right_curve, threshold=proximityThresh)
+
+    #Run 2nd time to clean up
+    left_curve = remove_close_coordinates(left_curve, points, threshold=proximityThresh)
+    right_curve = remove_close_coordinates(right_curve, points, threshold=proximityThresh)
+    left_curve = adjust_close_points(left_curve, threshold=proximityThresh)
+    right_curve = adjust_close_points(right_curve, threshold=proximityThresh)
 
     return left_curve, right_curve
 
@@ -104,14 +166,14 @@ def buildDXFFile(board):
             msp.add_circle(h, holeRadius, dxfattribs={'layer': "Holes_T"+str(t.Track_ID)})
 
         #Build in spline following along either side of each track
-        right_curve, left_curve = compute_offset_curve(holes_in, 0.25)
+        right_curve, left_curve = compute_offset_curve(np.array(holes_in), 0.16, 0.127)
         doc.layers.add(name="TrackPath_T"+str(t.Track_ID), color=rd.randint(1,30), linetype="DOTTED")
         msp.add_spline(right_curve, dxfattribs={'layer': "TrackPath_T"+str(t.Track_ID)})
         msp.add_spline(left_curve, dxfattribs={'layer': "TrackPath_T"+str(t.Track_ID)})
 
         # Every 5th hole draw marker line across
         doc.layers.add(name="NumMarks_T" + str(t.Track_ID), color=rd.randint(1, 30), linetype="DOTTED")
-        slashVectors = create_progress_marker_vectors(holes_in, 0.5) #NOTE this should be 2x offset dist of spline
+        slashVectors = create_progress_marker_vectors(np.array(holes_in), 0.35) #NOTE this should be 2x offset dist of spline
         for s in slashVectors:
             msp.add_lwpolyline(s, dxfattribs={'layer': "NumMarks_T"+str(t.Track_ID)})
 
