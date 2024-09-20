@@ -67,15 +67,22 @@ def compute_offset_curve(points, offset_distance, proximityThresh):
     right_curve = []
     direction_vector = np.array([(-1,-1),(-1,-1)])
 
-    # Loop through each pair of consecutive points on the curve
-    for i in range(len(points) - 1):
-        # Get two consecutive points
+    #Pad with pre-point and post-point so tracks extends past first and last hole
+    if len(points) >= 2:
+        p_pre = 1.6*points[0] - 0.6*points[1]
+        p_post = 1.6*points[len(points)-1] - 0.6*points[len(points) - 2]
+        aug_points = np.vstack([p_pre, points, p_post])
+    else: aug_points = points
+
+    # Loop through each pair of consecutive aug_points on the curve
+    for i in range(len(aug_points) - 1):
+        # Get two consecutive aug_points
         if i > 0:
             #use prev point ideally
-            p1 = points[i-1]
+            p1 = aug_points[i-1]
         else:
-            p1 = points[i]
-        p2 = points[i + 1]
+            p1 = aug_points[i]
+        p2 = aug_points[i + 1]
 
         # Compute the direction vector (from p1 to p2)
         direction_vector = p2 - p1
@@ -89,26 +96,26 @@ def compute_offset_curve(points, offset_distance, proximityThresh):
         # Scale the perpendicular vector to the offset distance
         perp_vector *= offset_distance
 
-        # Compute the points for the left and right offset curves
-        left_curve.append((points[i] + perp_vector).tolist())
-        right_curve.append((points[i] - perp_vector).tolist())
+        # Compute the aug_points for the left and right offset curves
+        left_curve.append((aug_points[i] + perp_vector).tolist())
+        right_curve.append((aug_points[i] - perp_vector).tolist())
 
     # Add the last point offsets (for the endpoint of the curve)
     last_perp_vector = np.array([-direction_vector[1], direction_vector[0]]) * offset_distance
-    left_curve.append((points[-1] + last_perp_vector).tolist())
-    right_curve.append((points[-1] - last_perp_vector).tolist())
+    left_curve.append((aug_points[-1] + last_perp_vector).tolist())
+    right_curve.append((aug_points[-1] - last_perp_vector).tolist())
 
     #Check proximity to holes, if too close remove outright
-    left_curve = remove_close_coordinates(left_curve, points, threshold=proximityThresh)
-    right_curve = remove_close_coordinates(right_curve, points, threshold=proximityThresh)
+    left_curve = remove_close_coordinates(left_curve, aug_points, threshold=proximityThresh)
+    right_curve = remove_close_coordinates(right_curve, aug_points, threshold=proximityThresh)
 
     #Check proximity to neighbours, if too close set each to midpoint of each other
     left_curve = adjust_close_points(left_curve, threshold=proximityThresh)
     right_curve = adjust_close_points(right_curve, threshold=proximityThresh)
 
     #Run 2nd time to clean up
-    left_curve = remove_close_coordinates(left_curve, points, threshold=proximityThresh)
-    right_curve = remove_close_coordinates(right_curve, points, threshold=proximityThresh)
+    left_curve = remove_close_coordinates(left_curve, aug_points, threshold=proximityThresh)
+    right_curve = remove_close_coordinates(right_curve, aug_points, threshold=proximityThresh)
     left_curve = adjust_close_points(left_curve, threshold=proximityThresh)
     right_curve = adjust_close_points(right_curve, threshold=proximityThresh)
 

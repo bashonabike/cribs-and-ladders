@@ -231,10 +231,12 @@ if __name__ == "__main__":
     # checkBoardBestTrial(1, 807)
     # genTrainSet()
 
+    #TODO: Add min cancels gp param, for excitement!
+
     routines = Routines(optimizerRunSet=2)
     # routines.runNormalCribGame(debug=False)
     routines.setUpBoard(homoRisk = True)
-    bestIterParams = routines.runIter(debug=True)
+    bestIterParams = routines.runIter(debug=False)
     print(bestIterParams)
     # bestFminParams = routines.runFmin()
     # print(bestFminParams)
