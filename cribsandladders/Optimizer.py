@@ -286,7 +286,8 @@ class Optimizer:
                         newVal = 1
                     else:
                         newVal = targetParam_sr['value'] * (
-                                    1.0 - reverse * inverse * reverseTrackwise * gp.changepctperiteration)
+                                    1.0 - reverse * inverse * reverseTrackwise * gp.changepctperiteration
+                                    * result_sr['WeighedResult'])
                     
 
                     if newVal < absbounds_sr['LBound'] or newVal > absbounds_sr['UBound']:

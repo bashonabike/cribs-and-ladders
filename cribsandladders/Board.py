@@ -93,13 +93,18 @@ class Board:
     #                                             {0, curtrack.num}],key=lambda x: x.start)))
     #         curtrack.setEventLadders([l.start for l in curtrack.ladders])
     #         curtrack.setEventChutes([c.start for c in curtrack.chutes])
-    def clearTrackEvents(self):
-        for t in self.tracks:
+    def clearTrackEvents(self, specificTracks = None):
+        if specificTracks is None:
+            tracksToIter = self.tracks
+        else:
+            tracksToIter = specificTracks
+        for t in tracksToIter:
             t.eventSetBuild = set()
             t.ladders = []
             t.chutes = []
             t.eventsListLadder = []
             t.eventsListChute = []
+            t.instLocked = False
 
 class Track:
     def __init__(self):
@@ -118,6 +123,7 @@ class Track:
         self.candidateEvents = None
         self.eventSetBuild = []
         self.effLandingForHoles = []
+        self.instLocked = False
         # This is pointwise sum of event value (+/-) * likelihood of hit (1/length)
         # So sum of event values * # events / length
         # This will always be negative since always more chutes than ladders

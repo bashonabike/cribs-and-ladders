@@ -190,7 +190,28 @@ class Routines:
         weighedScoring = 9999999
         self.eventSetBuilder.runMidpointInitParams(self.optimizerRunSet, self.optimizerRun)
         while weighedScoring > gp.iterscorecutoff:
-            self.board.setEffLandingForHolesAllTracks()
+            weighedPreScoring = 999999
+            while weighedPreScoring > gp.prescorecutoff:
+                self.board.setEffLandingForHolesAllTracks()
+                #Run initial board spec stats
+                evalPre = evl.Evaluator(self.eventSetBuilder, self.board, self.posevents, None, sqlOptimizerCon,
+                                     self.optimizerRunSet, self.optimizerRun)
+                evalPre.detMetrics(onlyGameBoardStats=True)
+                evalPre.writeMetricsToDb()
+                self.eventSetBuilder.paramSet.tempWriteMetricsToDb(evalPre)
+                # self.eventSetBuilder.paramSet.tempWriteEvents(stats, self.optimizerRunSet, self.optimizerRun)
+                weighedPreScoring = self.optimizer.detWeighedScoring(evalPre.results)
+                print(weighedPreScoring)
+                if weighedPreScoring <= gp.prescorecutoff:
+                    self.optimizer.setBestIterParams(self.eventSetBuilder.paramSet.params)
+                    break
+
+                self.optimizerRun += 1
+                freshParams = self.optimizer.runIncrIteration(self.eventSetBuilder.paramSet.params, evalPre.results)
+                self.eventSetBuilder.buildBoardFromParams(pd.DataFrame.from_records(freshParams),
+                                                          self.optimizerRunSet, self.optimizerRun)
+
+
             stats = crst.Stats(self.board, self.squad, self.optimizerRunSet, self.optimizerRun)
             self.run_trials(self.board, self.squad, stats, debug)
             eval = evl.Evaluator(self.eventSetBuilder, self.board, self.posevents, stats, sqlOptimizerCon,

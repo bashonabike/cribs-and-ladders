@@ -50,10 +50,10 @@ mincrowvectordistcancel = 12 #mm, since straight line approx this equates to ~15
 whenstartworryingaboutcancels = 3 #After this many cancels on a track, start impeding
 probminimodeliters = 200
 allowabletwohits = 1
-randomfeatheringamount = 14 #Nix holes randomly at nth interval to avoid endless opt loops
+randomfeatheringamount = 15 #Nix holes randomly at nth interval to avoid endless opt loops
 maxefflengthdisp = 14
-goodscorecutoff = 200
-gamelengthtightness = 7
+goodscorecutoff = 230
+gamelengthtightness = 4  #This is exponent mantissa, probably best keep below 6, should be int for perf
 
 #OPTIMIZER BOUNDING PARAMS
 maxeventsetfinesseiters = 10
@@ -62,7 +62,7 @@ maxitersconvergeoneventtrialset = 200
 maxitertrynewbuild = 200
 maxitertrackstalled = 20
 minqualityboardlengthmatching = 2 #Try to get within this many holes of ideal
-minqualityboardlengthintervalsrpt = 0.01
+minqualityboardlengthintervalsrpt = 0.005
 
 #OPTIMIZER BALANCING PARAMS
 #NOTE: changing these will require code changes!!!
@@ -91,6 +91,7 @@ optmultispct = 0.05
 #Iterative optimizer params
 changepctperiteration = 0.02
 iterscorecutoff = 6
+prescorecutoff = 4
 
 
 

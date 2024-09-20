@@ -53,6 +53,8 @@ class EventSetBuilder:
         self.pegRoundProbs =  [item["prob"] for item in gp.probPegRounds]
         self.benchmarkMoves_df = None
         self.track_dict = None
+        self.prevEffLengths_starter = [dict(track_id=t.Track_ID, efflength=len(t.trackholes))
+                                       for t in self.board.tracks]
 
     def clearEventSet(self):
         self.allTentLengthHisto = []
@@ -63,11 +65,13 @@ class EventSetBuilder:
         self.eventNodesByTrack = []
         for t in self.board.tracks:
             t.eventSetBuild = []
+            t.instLocked = False
 
     def optimizeSetup(self):
         builditer = 0
         self.paramSet.monteCarlo()
-        while not self.tryEventSet(self.paramSet):
+        prevEffLengths = cp.deepcopy(self.prevEffLengths_starter)
+        while not self.tryEventSet(self.paramSet, prevEffLengths):
             builditer += 1
             if builditer > gp.maxitertrynewbuild:
                 raise Exception(
@@ -82,7 +86,8 @@ class EventSetBuilder:
         self.paramSet.monteCarlo()
         self.paramSet.tempInsertParamsDb(optimizerRunSet, optimizerRun)
         builditer = 0
-        while not self.tryEventSet(self.paramSet):
+        prevEffLengths = cp.deepcopy(self.prevEffLengths_starter) 
+        while not self.tryEventSet(self.paramSet, prevEffLengths):
             builditer += 1
             if builditer > gp.maxitertrynewbuild:
                 raise Exception(
@@ -96,7 +101,8 @@ class EventSetBuilder:
         self.paramSet.midpointInitParams()
         self.paramSet.tempInsertParamsDb(optimizerRunSet, optimizerRun)
         builditer = 0
-        while not self.tryEventSet(self.paramSet):
+        prevEffLengths = cp.deepcopy(self.prevEffLengths_starter) 
+        while not self.tryEventSet(self.paramSet, prevEffLengths):
             #TEMPPPP
             # self.buildSetIntoEvents()
             # self.plot_coordinates_and_vectors()
@@ -117,7 +123,8 @@ class EventSetBuilder:
         self.paramSet.intakeParamsFromDb(optimizerRunSet, optimizerRun)
         # self.paramSet.tempInsertParamsDb(100000+optimizerRun)
         builditer = 0
-        while not self.tryEventSet(self.paramSet):
+        prevEffLengths = cp.deepcopy(self.prevEffLengths_starter) 
+        while not self.tryEventSet(self.paramSet, prevEffLengths):
             builditer += 1
             if builditer > gp.maxitertrynewbuild:
                 raise Exception(
@@ -131,7 +138,8 @@ class EventSetBuilder:
         self.clearEventSet()
         self.paramSet.tempInsertParamsDb(optimizerRunSet, optimizerRun)
         builditer = 0
-        while not self.tryEventSet(self.paramSet):
+        prevEffLengths = cp.deepcopy(self.prevEffLengths_starter) 
+        while not self.tryEventSet(self.paramSet, prevEffLengths):
             builditer += 1
             if builditer > gp.maxitertrynewbuild:
                 raise Exception(
@@ -144,7 +152,8 @@ class EventSetBuilder:
         self.clearEventSet()
         self.paramSet.intakeParams(instanceParams_df)
         builditer = 0
-        while not self.tryEventSet(self.paramSet):
+        prevEffLengths = cp.deepcopy(self.prevEffLengths_starter) 
+        while not self.tryEventSet(self.paramSet, prevEffLengths):
             builditer += 1
             if builditer > gp.maxitertrynewbuild:
                 raise Exception(
@@ -569,6 +578,12 @@ class EventSetBuilder:
                 candEventSpecs = explicitEvent
 
             if explicitEvent is None and candEventSpecs['isshared']:
+                #if one or more tracks are locked, no multis!
+                #TODO: get multis working w/ elim mode
+                # if t['nomultis']:
+                t['candcursor'] += 1
+                continue
+
                 #Check if linked event is legal
                 assertLegal = True
                 for ev in candEventSpecs['event'].linkedEvents:
@@ -740,19 +755,19 @@ class EventSetBuilder:
                     if curEstLengthDiscr > 0:
                         # Apply shortening control, board is too long
                         if reward:
-                            curScore = balScoreMod/gp.gamelengthtightness
-                            # curScore = balScoreMod * math.pow((1.0 - shorteningControl), 5)
+                            # curScore = balScoreMod/gp.gamelengthtightness
+                            curScore = balScoreMod * math.pow((1.0 - shorteningControl), gp.gamelengthtightness)
                         else:
-                            curScore = balScoreMod*gp.gamelengthtightness
-                            # curScore = balScoreMod * math.pow((1.0 + shorteningControl), 5)
+                            # curScore = balScoreMod*gp.gamelengthtightness
+                            curScore = balScoreMod * math.pow((1.0 + shorteningControl), gp.gamelengthtightness)
                     elif curEstLengthDiscr < 0:
                         # Apply lengthening control, board is too short
                         if reward:
-                            curScore = balScoreMod/gp.gamelengthtightness
-                            # curScore = balScoreMod * math.pow((1.0 - lengtheningControl), 5)
+                            # curScore = balScoreMod/gp.gamelengthtightness
+                            curScore = balScoreMod * math.pow((1.0 - lengtheningControl), gp.gamelengthtightness)
                         else:
-                            curScore = balScoreMod*gp.gamelengthtightness
-                            # curScore = balScoreMod * math.pow((1.0 + lengtheningControl), 5)
+                            # curScore = balScoreMod*gp.gamelengthtightness
+                            curScore = balScoreMod * math.pow((1.0 + lengtheningControl), gp.gamelengthtightness)
 
 
 
@@ -906,11 +921,11 @@ class EventSetBuilder:
                 #Elminate options based on shortening & lengthening control
                 if curEstLengthDiscr > 0 and shorteningControl > 0.5 and curScore > gp.goodscorecutoff * (
                         1.0 - (2 * (shorteningControl - 0.5))):
-                    print("Nogo")
+                    t['numnogos'] += 1
                     continue
                 elif curEstLengthDiscr < 0 and lengtheningControl > 0.5 and curScore > gp.goodscorecutoff * (
                         1.0 - (2 * (lengtheningControl - 0.5))):
-                    print("Nogo")
+                    t['numnogos'] += 1
                     continue
 
 
@@ -943,7 +958,7 @@ class EventSetBuilder:
         if ((len(eventFitnesses) > 0 and eventFitnesses[0]['score'] <= gp.goodscorecutoff)
                 or explicitEvent is not None) :
             return eventFitnesses
-        if len(eventFitnesses) > 0: print("DENIED")
+        if len(eventFitnesses) > 0: t['numdenies'] += 1
         return None
 
     def searchOrderedListForVal(self, orderedList, val):
@@ -1145,12 +1160,12 @@ class EventSetBuilder:
         avgChutesPct = sum([t['chutescompletepct'] for t in viableTracks])/len(viableTracks)
         return avgHolePct, avgChutesPct
 
-    def tryEventSet(self, params):
+    def tryEventSet(self, params, prevEffLengths):
         """
         Intiial flying blind set, no specs known
         """
 
-        self.board.clearTrackEvents()
+        self.board.clearTrackEvents(specificTracks=[t for t in self.board.tracks if not t.instLocked])
         trackEventsOverview = [dict(track=t, trackidx = t.num-1, tracknum=t.num, optevents=0, track_id=t.Track_ID,
                                     optfirstchute=0, trackfilled=False, tracklength=len(t.trackholes),
                                     lengthdeviation=(len(t.trackholes)-gp.effectiveboardlength )/gp.effectiveboardlength,
@@ -1166,8 +1181,14 @@ class EventSetBuilder:
                                     eventnodes=[],twohitsthusfar=0,cancels=0,eventscount=0,
                                     ladderbases=[], laddertops=[], holescompletepct=0.0, chutescompletepct=0.0, curhole=0,
                                     compensationbuffer = 0.0, trackstalledcounter=0, trackisstalled=False,
-                                    multistack=[], controllength = 0, curestefflength=len(t.trackholes))
-                          for t in self.board.tracks]
+                                    multistack=[], controllength = 0, curestefflength=len(t.trackholes),
+                                    nomultis = False,
+                                    numdenies=0, numnogos=0)
+                          for t in self.board.tracks if not t.instLocked]
+
+        #Lock out multis if one or more tracks are locked
+        if len(trackEventsOverview) != len(self.board.tracks):
+            for t in trackEventsOverview: t['nomultis'] = True
 
         #Load benchmarks
         self.retrieveOrGenerateBenchmarkMoves()
@@ -1413,44 +1434,68 @@ class EventSetBuilder:
                 stallCounter = 0
 
         effLengths = []
-        self.eventNodesByTrack = []
         for t in trackEventsOverview:
+            effLength = self.runPartialTrackEffLengthHoles(t['track_id'], t['eventsetbuild'],
+                                                           t['tracklength'],
+                                                           readMode=True)[0] * (t['tracklength'] / t['controllength'])
+            if abs(effLength - gp.effectiveboardlength) <= gp.minqualityboardlengthmatching:
+                #Lock this in!
+                t['track'].instLocked = True
+
             effLengths.append(dict(trackeventoverview=t, track_id=t['track_id'],
-                                   efflength=self.runPartialTrackEffLengthHoles(t['track_id'], t['eventsetbuild'],
-                                                                                t['tracklength'],
-                                                                                     readMode=True)[0]* (t['tracklength']/t['controllength'])))
+                                   efflength=effLength, tracklocked=t['track'].instLocked))
             sortedNodes = t['eventnodes']
             sortedNodes.sort()
-            self.eventNodesByTrack.append(dict(tracknum=t['tracknum'], nodes=sortedNodes))
+
+            nodesFound = False
+            if len(self.eventNodesByTrack) > 0:
+                for t_node in self.eventNodesByTrack:
+                    if t_node['tracknum'] == t['tracknum']:
+                        t_node['nodes'] = sortedNodes
+                        nodesFound = True
+                        break
+            if not nodesFound: self.eventNodesByTrack.append(dict(tracknum=t['tracknum'], nodes=sortedNodes))
+
             print("{} chutes, {} ladders, {} events; ctl: {} ltc: {}".format(len(t['chutes']), len(t['ladders']),
                                                                              len(t['eventsetbuild']),
                                                                   len(t['chutes'])/ len(t['ladders']),
                                                                   len(t['ladders'])/ len(t['chutes'])))
             print("Two hits: {}".format(t['twohitsthusfar']))
+            print("{} nogos, {} denies".format(t['numnogos'], t['numdenies']))
 
         avgEffLength = sum(l['efflength'] for l in effLengths)/len(effLengths)
 
         for l in effLengths:
             print("Track {} has effective length of {}, which should yield an approx {} balance"
                   .format(l['track_id'], l['efflength'],
-                          (avgEffLength-l['efflength'])/avgEffLength))
+                          (gp.effectiveboardlength-l['efflength'])/gp.effectiveboardlength))
 
         if (max([abs(l['efflength'] - gp.effectiveboardlength) for l in effLengths])
                 > gp.minqualityboardlengthmatching):
             #Massage balanceandefflengthcontrolfactor and retry
             #Longer balanceandefflengthcontrolfactor for longer route
             for l in effLengths:
+                if l['tracklocked']: continue
                 oldVal = self.paramSet.tryGetParam(l['track_id'], "balanceandefflengthcontrolfactor")
                 newVal = oldVal
-                if l['efflength'] < gp.effectiveboardlength - gp.minqualityboardlengthmatching:
+                #Take avg of this eff length and prev, to smooth out jumps
+                prevEffLength, prevEffIdx = gp.effectiveboardlength, -1
+                for l_prv_idx in range(0, len(prevEffLengths)):
+                    if prevEffLengths[l_prv_idx]['track_id'] == l['track_id']:
+                        prevEffIdx = l_prv_idx
+                        prevEffLength = prevEffLengths[l_prv_idx]['efflength']
+                        break
+
+                if (prevEffLength + l['efflength'])/2 < gp.effectiveboardlength - gp.minqualityboardlengthmatching:
                     #Increase factor to lengthen board
                     newVal = oldVal + gp.minqualityboardlengthintervalsrpt
-                elif l['efflength'] > gp.effectiveboardlength + gp.minqualityboardlengthmatching:
+                elif (prevEffLength + l['efflength'])/2 > gp.effectiveboardlength + gp.minqualityboardlengthmatching:
                     #Decrease factor to shorten board
                     newVal = oldVal - gp.minqualityboardlengthintervalsrpt
                 if newVal > 0.95: newVal = 0.95
                 elif newVal < 0.05: newVal = 0.05
                 self.paramSet.tryModParam(l['track_id'], "balanceandefflengthcontrolfactor", newVal)
+                prevEffLengths[prevEffIdx]['efflength'] = l['efflength']
 
             print("Retry, not good enough board eff length quality\n")
             return False
