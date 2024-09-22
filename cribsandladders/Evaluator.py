@@ -128,7 +128,22 @@ class Evaluator:
         else:
             result = 1
         self.results.append(dict(Result="eventSpacingHist_curvefit", ResultFlavour="GAME BOARD STRUCTURE STATISTIC STATS",
-                                 ResultValue=result, Weighting=0.1))
+                                 ResultValue=result, Weighting=2))
+
+        if onlyGameBoardStats:
+            #Event length track distribution as histogram
+            #Only do this if in prelim track eval mode, since better appraised by gameplay stat below
+            for t in self.board.tracks:
+                eventsLengthHist_l = self.processActualHistCurve([e.length for e in t.eventSetBuild])
+                if len(eventsLengthHist_l) == 0:
+                    result = 1
+                else:
+                    result = self.discreteRegression(gp.eventlengthdisthistcurvefile, eventsLengthHist_l)
+                self.results.append(dict(Result="trackEventLengthDistribution_curvefit_T{}".format(t.Track_ID),
+                                         ResultFlavour="GAME BOARD STRUCTURE STATISTIC STATS",
+                                         ResultValue=result, Weighting=8))
+
+
         if not onlyGameBoardStats:
             #GAMEPLAY SCALAR STATS
 
@@ -197,7 +212,7 @@ class Evaluator:
                 eventsOverTime_l = self.processActualTimeCurve(movesPerTrial_df, eventsOverTime_df, "hasevent")
                 result = self.discreteRegression(gp.eventsovertimecurvefile, eventsOverTime_l, smoothing=0.7)
             self.results.append(dict(Result="eventsOverTime_curvefit", ResultFlavour="GAMEPLAY STATISTICAL STATS (lol)",
-                                     ResultValue=result, Weighting=0.1))
+                                     ResultValue=result, Weighting=20))
 
             #Energy over time
             energyOverTime_df = pd.DataFrame.from_records([dict(movenum=m.movenum, eventmag=abs(m.ladderorchuteamt),
@@ -208,7 +223,7 @@ class Evaluator:
                 eventsOverTime_l = self.processActualTimeCurve(movesPerTrial_df, energyOverTime_df, "eventmag")
                 result =self.discreteRegression(gp.eventenergyfile, eventsOverTime_l, smoothing=0.6)
             self.results.append(dict(Result="energy_curvefit", ResultFlavour="GAMEPLAY STATISTICAL STATS (lol)",
-                                     ResultValue=result, Weighting=0.1))
+                                     ResultValue=result, Weighting=14))
 
             #Velocity over time
             velocityOverTime_df = pd.DataFrame.from_records([dict(movenum=m.movenum, score=m.score,
@@ -220,7 +235,7 @@ class Evaluator:
                 #Smooth, since we want to curve match general trends
                 result =self.discreteRegression(gp.velocityovertimecurvefile, velocityOverTime_l, smoothing=0.6)
             self.results.append(dict(Result="velocity_curvefit", ResultFlavour="GAMEPLAY STATISTICAL STATS (lol)",
-                                     ResultValue=result, Weighting=0.1))
+                                     ResultValue=result, Weighting=4))
 
             #Event length distribution as histogram
             eventsLengthHist_l = self.processActualHistCurve([abs(m.ladderorchuteamt) for m in self.moves if m.hasEvent])
@@ -230,7 +245,7 @@ class Evaluator:
                 result = self.discreteRegression(gp.eventlengthdisthistcurvefile, eventsLengthHist_l)
             self.results.append(dict(Result="eventsHitLengthDistribution_curvefit",
                                      ResultFlavour="GAMEPLAY STATISTICAL STATS (lol)",
-                                     ResultValue=result, Weighting=0.1))
+                                     ResultValue=result, Weighting=10))
 
             #If more than 50% of events are between 2 & 4 spaces, penalize (track-wise)
             for t in self.board.tracks:

@@ -786,7 +786,8 @@ class EventSetBuilder:
                 # if curScore < 0:
                 #     sdfsd=""
                 if abs(effEnergy) + abs(t['energybuffer']) > 0:
-                    curScore *= (1.0 + abs(effEnergy - t['energybuffer'])/(abs(effEnergy) + abs(t['energybuffer'])))
+                    curScore *= (1.0 + (params.tryGetParam(t['track_id'], 'energybufferenforcement')
+                                        *abs(effEnergy - t['energybuffer'])/(abs(effEnergy) + abs(t['energybuffer']))))
                 effNetEnergy = effEnergy + abs(effCompModulation)
 
                 # #NOTE: longer balanceandefflengthcontrolfactor for longer route
@@ -911,7 +912,13 @@ class EventSetBuilder:
                     curLenPerc = (self.allTentLengthHisto[curLength - 1][1] /
                                                      sum([h[1] for h in self.allTentLengthHisto]))
                 idealPerc = t['lengthdistidealcurve'][curLength - 1][1]
-                curScore *= (1.0 + (curLenPerc - idealPerc) * params.tryGetParam(t['track_id'],'lengthhistogramscoringfactor'))
+                lenDistDisp = curLenPerc - idealPerc
+                if lenDistDisp < 0:
+                    #Need more!
+                    curScore /= (1.0 + abs(lenDistDisp))*params.tryGetParam(t['track_id'],'lengthhistogramscoringfactor')
+                elif lenDistDisp > 0:
+                    #Too many of this length already, downshift
+                    curScore *= (1.0 + abs(lenDistDisp))*params.tryGetParam(t['track_id'],'lengthhistogramscoringfactor')
 
                 #Factor in distribution of length over time
                 #TEMP!!
