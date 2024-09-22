@@ -56,9 +56,10 @@ def svgParserHoles(svgFilePath, boardHeight = -1, tracknum = -1, returnRawCoords
     if allcoords[0][0] > allcoords[len(holes)-1][0]: allcoords =  list(reversed(allcoords))
 
     if not returnRawCoords:
-        for coord in allcoords:
+        for coord_idx in range(0, len(allcoords)):
             holenum += 1
-            holes.append(Hole(coord[0], coord[1], holenum, tracknum))
+            coord = allcoords[coord_idx]
+            holes.append(Hole(coord[0], coord[1], holenum, tracknum, lastHole=coord_idx == len(allcoords)-1))
         return holes
     else:
         return allcoords
@@ -130,10 +131,11 @@ def build_interception_test_vector_set(main_set):
 
 
 class Hole:
-    def __init__(self, x, y, num, tracknum):
+    def __init__(self, x, y, num, tracknum, lastHole=False):
         self.coords = (x, y)
         self.num = num
         self.tracknum = tracknum
+        self.lastHole = lastHole
 
     def __hash__(self):
         return hash(self.coords)

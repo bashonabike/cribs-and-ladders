@@ -149,9 +149,10 @@ class PossibleEvents:
         #Iterate, by track, determining all possible candidate events
         for t in self.byTrackCandidateSets:
             holes = t.holes_l
+            #NOTE: no events on the last hole!
             for h_a_idx in range(0, len(holes) -1):
                 h_a = holes[h_a_idx]
-                for h_b_idx in range(h_a_idx+1, len(holes)):
+                for h_b_idx in range(h_a_idx+1, len(holes) -1):
                     h_b = holes[h_b_idx]
                     # if h_a.num == 5 and h_b.num == 30 and t.trackNum == 1:
                     #     p1 = np.array(h_a.coords)
@@ -214,22 +215,23 @@ class PossibleEvents:
                             #NOTE that if say we are on track 1 (inner) and there is an enclosing fold of say track 2
                             #this multi-event will be picked up when we run track 2
                             trackshit_cleaned = cp.deepcopy(tracksHit)
-                            for t_sub_num in list(set(tracksHit)):
-                                if tracksHit.count(t_sub_num) == 1:
-                                    #Track only hit once, elig for ext!
-                                    tracksForExtension.append(t_sub_num)
-                                    eligibleForExtension = True
-                                    completeMulti = False
-                                elif tracksHit.count(t_sub_num) == 2:
-                                    tracksClosed.append(t_sub_num)
-                                    trackshit_cleaned = [t for t in trackshit_cleaned if t != t_sub_num]
-                                    if not eligibleForExtension: completeMulti = True
-                                elif tracksHit.count(t_sub_num) > 2:
-                                    #Cannot ever hit track more than 2x!
-                                    eligibleForExtension = False
-                                    completeMulti = False
-                                    break
-                            tracksHit = trackshit_cleaned
+                            if len([h for h in holesHitAllTracks if h.lastHole]) == 0:
+                                for t_sub_num in list(set(tracksHit)):
+                                    if tracksHit.count(t_sub_num) == 1:
+                                        #Track only hit once, elig for ext!
+                                        tracksForExtension.append(t_sub_num)
+                                        eligibleForExtension = True
+                                        completeMulti = False
+                                    elif tracksHit.count(t_sub_num) == 2:
+                                        tracksClosed.append(t_sub_num)
+                                        trackshit_cleaned = [t for t in trackshit_cleaned if t != t_sub_num]
+                                        if not eligibleForExtension: completeMulti = True
+                                    elif tracksHit.count(t_sub_num) > 2:
+                                        #Cannot ever hit track more than 2x!
+                                        eligibleForExtension = False
+                                        completeMulti = False
+                                        break
+                                tracksHit = trackshit_cleaned
                             if len(tracksHit) == 0: eligibleForExtension = False
 
                             if eligibleForExtension:
@@ -264,7 +266,8 @@ class PossibleEvents:
                                         if cnt[i] >= mx[i]:
                                             stuck[i] = True
                                         else:
-                                            if holesHitList_l[i][cnt[i]].tracknum in tracksHit:
+                                            if (not holesHitMultiList_l[i].lastHole and
+                                                    holesHitMultiList_l[i][cnt[i]].tracknum in tracksHit):
                                                 #Success!  We have closed a loop
                                                 tracksHit.remove(holesHitList_l[i][cnt[i]].tracknum)
                                                 tracksClosed.append(holesHitList_l[i][cnt[i]].tracknum)

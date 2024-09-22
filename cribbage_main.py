@@ -212,6 +212,7 @@ class Routines:
                                                           self.optimizerRunSet, self.optimizerRun)
 
 
+            self.optimizerRun += 1
             stats = crst.Stats(self.board, self.squad, self.optimizerRunSet, self.optimizerRun)
             self.run_trials(self.board, self.squad, stats, debug)
             eval = evl.Evaluator(self.eventSetBuilder, self.board, self.posevents, stats, sqlOptimizerCon,
@@ -254,9 +255,9 @@ if __name__ == "__main__":
 
     #TODO: Add min cancels gp param, for excitement!
 
-    routines = Routines(optimizerRunSet=2)
+    routines = Routines(optimizerRunSet=3)
     # routines.runNormalCribGame(debug=False)
-    routines.setUpBoard(homoRisk = True)
+    routines.setUpBoard(homoRisk = False)
     bestIterParams = routines.runIter(debug=False)
     print(bestIterParams)
     # bestFminParams = routines.runFmin()
