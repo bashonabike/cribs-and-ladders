@@ -54,6 +54,7 @@ randomfeatheringamount = 13 #Nix holes randomly at nth interval to avoid endless
 maxefflengthdisp = 14
 goodscorecutoff = 230
 gamelengthtightness = 4  #This is exponent mantissa, probably best keep below 6, should be int for perf
+idealcancelspct = 0.25
 
 #OPTIMIZER BOUNDING PARAMS
 maxeventsetfinesseiters = 10
@@ -89,9 +90,9 @@ optmultispct = 0.05
 
 ##################################################################################################
 #Iterative optimizer params
-changepctperiteration = 0.02
+changebaseincrperiter = 0.01
 iterscorecutoff = 5
-prescorecutoff = 3.5
+prescorecutoff = 2.5
 
 
 

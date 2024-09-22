@@ -96,7 +96,9 @@ class Evaluator:
                                  ResultValue=multis, ResultValueIterative=multisit, Weighting=1))
 
         if self.eventSetBuilder.events > 0:
-            cancels = self.eventSetBuilder.cancels/self.eventSetBuilder.events
+            cancels = (self.eventSetBuilder.cancels/self.eventSetBuilder.events) - gp.idealcancelspct
+            #If too few cancels, don't sweat it, muchks with iter model
+            if cancels < 0: cancels = 0
         else:
             cancels = 0
         self.results.append(dict(Result="cancels", ResultFlavour="GAME BOARD STRUCTURE SCALAR STATS",

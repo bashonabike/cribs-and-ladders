@@ -282,13 +282,9 @@ class Optimizer:
                     #     newVal = targetParam_sr['value']*(1.0 - reverse*inverse*reverseTrackwise*gp.changepctperiteration)
                     # else:
                     #     newVal = targetParam_sr['value']*(1.0 - reverse*inverse*reverseTrackwise*gp.changepctperiteration)
-                    if targetParam_sr['value'] == 0:
-                        newVal = 1
-                    else:
-                        newVal = targetParam_sr['value'] * (
-                                    1.0 - reverse * inverse * reverseTrackwise * gp.changepctperiteration
-                                    * result_sr['WeighedResult'])
-                    
+                    changeAmt = ((absbounds_sr['UBound'] - absbounds_sr['LBound'])*gp.changebaseincrperiter
+                                 * result_sr['WeighedResult'])
+                    newVal = targetParam_sr['value'] - (reverse * inverse * reverseTrackwise * changeAmt)
 
                     if newVal < absbounds_sr['LBound'] or newVal > absbounds_sr['UBound']:
                         paramMaxed = True

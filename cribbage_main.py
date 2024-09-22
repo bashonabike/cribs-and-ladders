@@ -255,7 +255,7 @@ if __name__ == "__main__":
 
     #TODO: Add min cancels gp param, for excitement!
 
-    routines = Routines(optimizerRunSet=3)
+    routines = Routines(optimizerRunSet=4)
     # routines.runNormalCribGame(debug=False)
     routines.setUpBoard(homoRisk = False)
     bestIterParams = routines.runIter(debug=False)

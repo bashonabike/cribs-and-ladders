@@ -894,6 +894,14 @@ class EventSetBuilder:
                     curScore *= (1.0 + params.tryGetParam(t['track_id'],'cancelimpedance')*(t['cancels'] + 1)
                                  /(t['eventscount'] + 1))
 
+                #Preferentially weight based on proximity to end of track
+                endTrackWeight = params.tryGetParam(t['track_id'], 'eventstowardsendoftrackreward')
+                eventPosRelMidpoints = candEventSpecs['event'].midPointNum/t['tracklength'] - 0.5
+                if eventPosRelMidpoints < 0:
+                    curScore *= (1.0 + abs(eventPosRelMidpoints)*endTrackWeight)
+                else:
+                    curScore /= (1.0 + abs(eventPosRelMidpoints)*endTrackWeight)
+
                 #Factor in distribution of length histogram to help ensure distributed lengths
                 #Try to curve fit specified ideal histo
                 #NOTE: golf-stylee, lower score is better
