@@ -1956,6 +1956,7 @@ class ParamSet:
 
                     # Input metric info
                     metrics_df = pd.DataFrame.from_records(evaluator.results)
+                    metrics_df['WeightedValue'] = metrics_df['Weighting']*metrics_df['ResultValue']
                     metrics_df.drop(['Weighting', 'ResultValueIterative'], axis=1, inplace=True)
                     metrics_df['OptimizerRunSet'] = evaluator.optimizerRunSet
                     metrics_df['OptimizerRun'] = evaluator.optimizerRun
@@ -1976,8 +1977,10 @@ class ParamSet:
                     sqliteCursor.execute("BEGIN TRANSACTION")
                     # sqliteCursor.execute("select * from  Testtest")
                     for index, record in metrics_df.iterrows():
-                        sqliteCursor.execute(metricsQuery_sb.getvalue(), [record['Result'], record['ResultFlavour'], record['ResultValue'],
-                                                     record['OptimizerRunSet'], record['OptimizerRun'], record['Board_ID']])
+                        sqliteCursor.execute(metricsQuery_sb.getvalue(), [record['Result'], record['ResultFlavour'],
+                                                                          record['ResultValue'], record['WeightedValue'],
+                                                                          record['OptimizerRunSet'],
+                                                                          record['OptimizerRun'], record['Board_ID']])
 
                     sqliteCursor.execute("END TRANSACTION")
                     # sqliteCursor.executemany(metricsQuery_sb.getvalue(), metrics_df)

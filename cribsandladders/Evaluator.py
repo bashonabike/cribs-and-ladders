@@ -128,7 +128,7 @@ class Evaluator:
         else:
             result = 1
         self.results.append(dict(Result="eventSpacingHist_curvefit", ResultFlavour="GAME BOARD STRUCTURE STATISTIC STATS",
-                                 ResultValue=result, Weighting=2))
+                                 ResultValue=result, Weighting=15))
 
         if onlyGameBoardStats:
             #Event length track distribution as histogram

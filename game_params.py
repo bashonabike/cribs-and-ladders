@@ -91,8 +91,8 @@ optmultispct = 0.05
 ##################################################################################################
 #Iterative optimizer params
 changebaseincrperiter = 0.01
-iterscorecutoff = 4
-prescorecutoff = 3.5
+iterscorecutoff = 5
+prescorecutoff = 4
 
 
 
