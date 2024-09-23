@@ -29,6 +29,7 @@ from datetime import datetime as dt
 from io import StringIO
 import contextlib
 from collections import defaultdict
+import markovgame as mg
 
 #TODO: curvify lines, order by length in holes, curve it bspline? then iterate out making sure curve does not interfere with any neighbours
 #maybe do this as sep class, once have a board w/ tracks and events established, call Curvify
@@ -55,6 +56,7 @@ class EventSetBuilder:
         self.track_dict = None
         self.prevEffLengths_starter = [dict(track_id=t.Track_ID, efflength=len(t.trackholes))
                                        for t in self.board.tracks]
+        self.avgScoreSum, self.avgScoreDiv, self.avgScore = 0, 0, 0
 
     def clearEventSet(self):
         self.allTentLengthHisto = []
@@ -66,6 +68,7 @@ class EventSetBuilder:
         for t in self.board.tracks:
             t.eventSetBuild = []
             t.instLocked = False
+        self.avgScoreSum, self.avgScoreDiv, self.avgScore = 0, 0, 0
 
     def optimizeSetup(self):
         builditer = 0
@@ -436,80 +439,86 @@ class EventSetBuilder:
         else:
             iters = overrideIters
 
-        sequencesOfMoves = []
-        moveCounter = 0
-        curSequence = []
-        curReadSeq = []
-        for trial in range(iters):
-            #Set up trial gameplay
-            startLoc = 0
-            if not readMode:
-                if trial > 0: sequencesOfMoves.append(curSequence)
-                curSequence = []
-            else:
-                moveCounter = 0
-                # startLoc = self.benchmarkMoves_df.index.get_loc((track_id, trial, 0))
-                curReadSeq = self.track_dict[track_id][trial]
-            dealer = rd.randint(1, gp.numplayers)
-            curPos = 0
-            countLoops = 0
-            trackPosSeq = []
-            while curPos < trackActualLength:
+        if not readMode:
+            sequencesOfMoves = []
+            moveCounter = 0
+            curSequence = []
+            curReadSeq = []
+            for trial in range(iters):
+                #Set up trial gameplay
+                startLoc = 0
                 if not readMode:
-                    #Run pegging:
-                    pegRounds = rd.choices(self.pegRounds, weights=self.pegRoundProbs, k=1)[0]
-                    for r in range(pegRounds):
-                        curMove = rd.choices(self.posPegs, weights=self.posPegProbs, k=1)[0]
-                        curSequence.append(curMove)
-                        if curPos + curMove > len(effHoleMap):
-                            curPos += curMove
-                        else:
-                            curPos = effHoleMap[curPos + curMove - 1]
-                        movesAllTrials += 1
+                    if trial > 0: sequencesOfMoves.append(curSequence)
+                    curSequence = []
+                else:
+                    moveCounter = 0
+                    # startLoc = self.benchmarkMoves_df.index.get_loc((track_id, trial, 0))
+                    curReadSeq = self.track_dict[track_id][trial]
+                dealer = rd.randint(1, gp.numplayers)
+                curPos = 0
+                countLoops = 0
+                trackPosSeq = []
+                while curPos < trackActualLength:
+                    if not readMode:
+                        #Run pegging:
+                        pegRounds = rd.choices(self.pegRounds, weights=self.pegRoundProbs, k=1)[0]
+                        for r in range(pegRounds):
+                            curMove = rd.choices(self.posPegs, weights=self.posPegProbs, k=1)[0]
+                            curSequence.append(curMove)
+                            if curPos + curMove > len(effHoleMap):
+                                curPos += curMove
+                            else:
+                                curPos = effHoleMap[curPos + curMove - 1]
+                            movesAllTrials += 1
+                            if curPos >= trackActualLength: break
                         if curPos >= trackActualLength: break
-                    if curPos >= trackActualLength: break
 
-                    #Score hand
-                    curMove = rd.choices(self.posHands, weights=self.posHandProbs, k=1)[0]
-                    curSequence.append(curMove)
-                    if curPos + curMove > len(effHoleMap): curPos += curMove
-                    else: curPos = effHoleMap[curPos + curMove - 1]
-                    movesAllTrials += 1
-                    if curPos >= trackActualLength: break
-
-                    if dealer == 1:
-                        #Score crib
+                        #Score hand
                         curMove = rd.choices(self.posHands, weights=self.posHandProbs, k=1)[0]
                         curSequence.append(curMove)
                         if curPos + curMove > len(effHoleMap): curPos += curMove
                         else: curPos = effHoleMap[curPos + curMove - 1]
                         movesAllTrials += 1
                         if curPos >= trackActualLength: break
-                    dealer = 1 + dealer%gp.numplayers
-                else:
-                    # curMove = self.benchmarkMoves_df.iloc[startLoc + moveCounter]['MoveVal']
-                    curMove = curReadSeq[moveCounter]
-                    if moveCounter ==0:
-                        countLoops += 1
-                    moveCounter = (moveCounter + 1)%len(curReadSeq)
-                    if curPos + curMove > len(effHoleMap):
-                        curPos += curMove
-                    else:
-                        curPos = effHoleMap[curPos + curMove - 1]
-                    trackPosSeq.append(curPos)
-                    movesAllTrials += 1
-                    if countLoops > 10:
-                        #Track is stuck in an infinite loop!!! This event is no bueno
-                        return 9999999, []
-                    if curPos >= trackActualLength: break
-        if not readMode: sequencesOfMoves.append(curSequence)
 
-        #Forecast length of game based on control-case ideal moves:hole ratio
-        actualPartialMoves = (movesAllTrials/iters)
-        eventlessCtrlPartialMoves = (gp.ideallikelihoodholehit*trackActualLength)
-        shiftPct = actualPartialMoves/eventlessCtrlPartialMoves
-        forecastedTrackEffLengthHoles = trackActualLength*shiftPct
-        return forecastedTrackEffLengthHoles, sequencesOfMoves
+                        if dealer == 1:
+                            #Score crib
+                            curMove = rd.choices(self.posHands, weights=self.posHandProbs, k=1)[0]
+                            curSequence.append(curMove)
+                            if curPos + curMove > len(effHoleMap): curPos += curMove
+                            else: curPos = effHoleMap[curPos + curMove - 1]
+                            movesAllTrials += 1
+                            if curPos >= trackActualLength: break
+                        dealer = 1 + dealer%gp.numplayers
+                    else:
+                        # curMove = self.benchmarkMoves_df.iloc[startLoc + moveCounter]['MoveVal']
+                        curMove = curReadSeq[moveCounter]
+                        if moveCounter ==0:
+                            countLoops += 1
+                        moveCounter = (moveCounter + 1)%len(curReadSeq)
+                        if curPos + curMove > len(effHoleMap):
+                            curPos += curMove
+                        else:
+                            curPos = effHoleMap[curPos + curMove - 1]
+                        trackPosSeq.append(curPos)
+                        movesAllTrials += 1
+                        if countLoops > 10:
+                            #Track is stuck in an infinite loop!!! This event is no bueno
+                            return 9999999, []
+                        if curPos >= trackActualLength: break
+            if not readMode: sequencesOfMoves.append(curSequence)
+
+            #Forecast length of game based on control-case ideal moves:hole ratio
+            actualPartialMoves = (movesAllTrials/iters)
+            eventlessCtrlPartialMoves = (gp.ideallikelihoodholehit*trackActualLength)
+            shiftPct = actualPartialMoves/eventlessCtrlPartialMoves
+            forecastedTrackEffLengthHoles = trackActualLength*shiftPct
+            return forecastedTrackEffLengthHoles, sequencesOfMoves
+        else:
+            forecastedTrackEffLengthHoles = mg.runPartialTrackEffLengthHoles(trackActualLength, gp.probminimodeliters,
+                                                                             self.track_dict[track_id],effHoleMap,
+                                                                             gp.numplayers, gp.ideallikelihoodholehit)
+            return forecastedTrackEffLengthHoles, None
 
 
     def scoreEventsForHole (self, t, hole,
@@ -933,13 +942,20 @@ class EventSetBuilder:
                     else:
                         curScore /= scoreMod
 
+                #Aggr into avg score
+                self.avgScoreSum += curScore
+                self.avgScoreDiv += 1
+                self.avgScore = self.avgScoreSum/self.avgScoreDiv
+
                 #Elminate options based on shortening & lengthening control
-                if curEstLengthDiscr > 0 and shorteningControl > 0.5 and curScore > gp.goodscorecutoff * (
-                        1.0 - (2 * (shorteningControl - 0.5))):
+                if (curEstLengthDiscr > 0 and shorteningControl > 0.5 and curScore > self.avgScore
+                        *gp.goodscorecutoffperc*2 * (
+                        1.0 - (2 * (shorteningControl - 0.5)))):
                     t['numnogos'] += 1
                     continue
-                elif curEstLengthDiscr < 0 and lengtheningControl > 0.5 and curScore > gp.goodscorecutoff * (
-                        1.0 - (2 * (lengtheningControl - 0.5))):
+                elif (curEstLengthDiscr < 0 and lengtheningControl > 0.5 and curScore > self.avgScore
+                      *gp.goodscorecutoffperc*2 * (
+                        1.0 - (2 * (lengtheningControl - 0.5)))):
                     t['numnogos'] += 1
                     continue
 
@@ -970,7 +986,7 @@ class EventSetBuilder:
             t['candcursor'] += 1
 
         eventFitnesses.sort(key=lambda f: f['score'])
-        if ((len(eventFitnesses) > 0 and eventFitnesses[0]['score'] <= gp.goodscorecutoff)
+        if ((len(eventFitnesses) > 0 and eventFitnesses[0]['score'] <= self.avgScore*gp.goodscorecutoffperc*2)
                 or explicitEvent is not None) :
             return eventFitnesses
         if len(eventFitnesses) > 0: t['numdenies'] += 1
