@@ -172,7 +172,7 @@ class CribbageGame:
         self.moves.append(Move(self.threadNum, self.trial, curTrack, self.moveNum, self.round, player.num, player.score,
                                amount, reason, event, newPos, soexcite, pegMove))
         player.score = newPos
-        if player.score >= curTrack.efflength:
+        if player.score > curTrack.efflength:
             player.wins += 1
             return True
 
