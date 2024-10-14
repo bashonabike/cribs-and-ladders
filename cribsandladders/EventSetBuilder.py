@@ -424,12 +424,15 @@ class EventSetBuilder:
 
         effHoleMap = []
         eIdx = 0
+        #Extend track by 2 to incorporate start & finish holes
+        effHoleMap.append(0)
         for idx in range(trackActualLength):
             if eIdx < len(partialEventMappings) and partialEventMappings[eIdx]['start'] == idx + 1:
                 effHoleMap.append(partialEventMappings[eIdx]['end'])
                 eIdx += 1
             else:
                 effHoleMap.append(idx + 1)
+        effHoleMap.append(trackActualLength + 1)
 
 
         #Figure out length of partial game

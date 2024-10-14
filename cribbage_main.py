@@ -238,8 +238,6 @@ class Routines:
 
 
 if __name__ == "__main__":
-    #TODO: mult-processing
-    #TODO: time events, look for heavy hitters, maybe GPT it into c+++ bind?
     # for batch in range(gp.batchnum):
     #     # curBoardName = input("Please enter board name: ")
     #     curBoardName = "LM Init Trial #2"

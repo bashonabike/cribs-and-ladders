@@ -184,6 +184,16 @@ def buildDXFFile(board):
         for s in slashVectors:
             msp.add_lwpolyline(s, dxfattribs={'layer': "NumMarks_T"+str(t.Track_ID)})
 
+        #Add starter holes + circumference
+        msp.add_circle([0, t.num*0.2], holeRadius, dxfattribs={'layer': "Holes_T"+str(t.Track_ID)})
+        msp.add_circle([6/25.4, t.num*0.2], holeRadius, dxfattribs={'layer': "Holes_T"+str(t.Track_ID)})
+        msp.add_ellipse([3/25.4, t.num*0.2], [9/25.4, t.num*0.2], 0.5,
+                        dxfattribs={'layer': "TrackPath_T"+str(t.Track_ID)})
+
+    #Add shared finish hole
+    doc.layers.add(name="Holes_Finish", color=rd.randint(1,30), linetype="DASHED")
+    msp.add_circle(convert_mm_to_in([tuple(board.width, board.height)]), holeRadius, dxfattribs={'layer': "Holes_Finish"})
+
     #Build in events
     for t in board.tracks:
         doc.layers.add(name="NormEvents_T" + str(t.Track_ID), color=rd.randint(1, 30), linetype="DASHED")
