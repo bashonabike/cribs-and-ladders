@@ -1,0 +1,10 @@
+^C:\USERS\DELL 5290\DOCUMENTS\CRIBS-AND-LADDERS\MARKOVBIND\BUILD\TEMP.WIN-AMD64-CPYTHON-312\RELEASE\SCORETREE\CMAKEFILES\2DE4157D0C64ACC13B45B36FEC5B8FE1\GENERATE.STAMP.RULE
+setlocal
+"C:\Users\Dell 5290\AppData\Local\Temp\pip-build-env-zd8oxryq\overlay\Lib\site-packages\cmake\data\bin\cmake.exe" "-SC:/Users/Dell 5290/Documents/cribs-and-ladders/MarkovBind" "-BC:/Users/Dell 5290/Documents/cribs-and-ladders/MarkovBind/build/temp.win-amd64-cpython-312/Release/scoretree" --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file "C:/Users/Dell 5290/Documents/cribs-and-ladders/MarkovBind/build/temp.win-amd64-cpython-312/Release/scoretree/markovgame_binding.sln"
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

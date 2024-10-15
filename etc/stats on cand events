@@ -1,0 +1,6 @@
+select Track_ID, startHole, avg(endHole-startHole),min(endHole-startHole),max(endHole-startHole), count(1)
+ From TempCandidateEvents
+where Board_ID = 12
+group by Track_ID, startHole
+having max(endHole-startHole) < 3
+order by Track_ID, startHole
