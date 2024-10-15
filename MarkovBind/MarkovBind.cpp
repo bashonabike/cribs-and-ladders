@@ -28,24 +28,28 @@ double runPartialTrackEffLengthHoles(
     // Simulation
     int movesAllTrials = 0;
     int iters = probminimodeliters;
-    int effHoleMapSize = effHoleMap.size();  // Precompute size
-    double eventlessCtrlPartialMoves = ideallikelihoodholehit * trackActualLength;  // Precompute
+    int moveCounter = 0;
 
     for (int trial = 0; trial < iters; ++trial) {
-        int moveCounter = 0;
+        // Trial Gameplay setup
+        moveCounter = 0;
+        // int dealer = rand() % numplayers + 1;
         int curPos = 0;
         int countLoops = 0;
-        const std::vector<int>& curReadSeq = curReadSeqs[trial];  // Reference to avoid copying
+        // std::vector<int> curReadSeq = curReadSeqs[trial];
 
         while (curPos <= trackActualLength) {
-            int curMove = curReadSeq[moveCounter];
+            // Get current move
+            // int curMove = curReadSeq[moveCounter];
+            int curMove = curReadSeqs[trial][moveCounter];
             if (moveCounter == 0) {
                 countLoops++;
             }
-            moveCounter = (moveCounter + 1) % curReadSeq.size();
+            // moveCounter = (moveCounter + 1) % curReadSeq.size();
+            moveCounter = (moveCounter + 1) % curReadSeqs[trial].size();
 
             // Move player
-            if (curPos + curMove > effHoleMapSize) {
+            if (curPos + curMove > effHoleMap.size()) {
                 curPos += curMove;
             }
             else {
@@ -65,11 +69,38 @@ double runPartialTrackEffLengthHoles(
 
     // Forecast length of the game
     double actualPartialMoves = static_cast<double>(movesAllTrials) / iters;
+    double eventlessCtrlPartialMoves = ideallikelihoodholehit * trackActualLength;
     double shiftPct = actualPartialMoves / eventlessCtrlPartialMoves;
     double forecastedTrackEffLengthHoles = trackActualLength * shiftPct;
 
     return forecastedTrackEffLengthHoles;
 }
+
+//int main() {
+//    srand(static_cast<unsigned int>(time(0))); // Seed for random generator
+//
+//    // Sample data for testing
+//    int track_id = 1;
+//    std::vector<Event> partialEventSet = {
+//        {1, 10, true, false},
+//        {5, 3, false, true}
+//    };
+//    int trackActualLength = 50;
+//    int probminimodeliters = 100;
+//    std::unordered_map<int, std::vector<std::vector<int>>> track_dict = {
+//        {1, {{3, 5, 2}, {4, 1, 6}}}
+//    };
+//    int numplayers = 4;
+//    double ideallikelihoodholehit = 0.5;
+//
+//    double result = runPartialTrackEffLengthHoles(track_id, partialEventSet, trackActualLength, probminimodeliters, track_dict, numplayers, ideallikelihoodholehit);
+//
+//    std::cout << "Forecasted Track Effective Length: " << result << std::endl;
+//
+//    return 0;
+//}
+
+
 
 namespace py = pybind11;
 

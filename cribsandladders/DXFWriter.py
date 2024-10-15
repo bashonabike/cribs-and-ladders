@@ -77,7 +77,7 @@ def rotate_vector_2d(direction_vector, angle_deg):
 def compute_offset_curve(points, offset_distance, proximityThresh):
     # List to store points for the left and right offset curves
     left_curve, right_curve = [], []
-    left_arrows, right_arrows = [], []
+    arrows = []
     direction_vector = np.array([(-1,-1),(-1,-1)])
 
     #Pad with pre-point and post-point so tracks extends past first and last hole
@@ -113,16 +113,17 @@ def compute_offset_curve(points, offset_distance, proximityThresh):
         left_curve.append((aug_points[i] + perp_vector).tolist())
         right_curve.append((aug_points[i] - perp_vector).tolist())
 
-        if i%10 == 0:
+        if (i%7 == 0 and i%5 != 0) or ((i - 1)%5 == 0 and (i - 1)%7 == 0):
+            # Det arrow start point
+            arrow_head = aug_points[i] + (3/25.4)*direction_vector
+
             # Build arrow unit vectors
-            left_arrow_unit_vect = rotate_vector_2d(norm_perp_vector, 80)
-            right_arrow_unit_vect = rotate_vector_2d((-1)*norm_perp_vector, -80)
+            left_arrow_vect = rotate_vector_2d((-1)*direction_vector, -20)*0.15
+            right_arrow_vect = rotate_vector_2d((-1)*direction_vector, 20)*0.15
 
             # Build vectors and append to lists
-            left_arrows.append([(aug_points[i] + perp_vector).tolist(), (aug_points[i] + perp_vector +
-                                                                         0.25*left_arrow_unit_vect).tolist()])
-            right_arrows.append([(aug_points[i] - perp_vector).tolist(), (aug_points[i] - perp_vector +
-                                                                          0.25*right_arrow_unit_vect).tolist()])
+            arrows.append([arrow_head.tolist(), (arrow_head + left_arrow_vect).tolist()])
+            arrows.append([arrow_head.tolist(), (arrow_head + right_arrow_vect).tolist()])
 
     # Add the last point offsets (for the endpoint of the curve)
     last_perp_vector = np.array([-direction_vector[1], direction_vector[0]]) * offset_distance
@@ -143,7 +144,7 @@ def compute_offset_curve(points, offset_distance, proximityThresh):
     left_curve = adjust_close_points(left_curve, threshold=proximityThresh)
     right_curve = adjust_close_points(right_curve, threshold=proximityThresh)
 
-    return left_curve, right_curve, left_arrows, right_arrows
+    return left_curve, right_curve, arrows
 
 def create_progress_marker_vectors(hole_list, length):
     vectors = []  # List to store the orthogonal vectors
@@ -214,14 +215,14 @@ def buildDXFFile(board):
             msp.add_circle(h, holeRadius, dxfattribs={'layer': "Holes_T"+str(t.Track_ID)})
 
         #Build in spline following along either side of each track
-        right_curve, left_curve, right_arrows, left_arrows =\
+        right_curve, left_curve, arrows =\
             compute_offset_curve(np.array(holes_in), 0.16, 0.127)
         doc.layers.add(name="TrackPath_T"+str(t.Track_ID), color=rd.randint(1,30), linetype="DOTTED")
         msp.add_spline(right_curve, dxfattribs={'layer': "TrackPath_T"+str(t.Track_ID)})
         msp.add_spline(left_curve, dxfattribs={'layer': "TrackPath_T"+str(t.Track_ID)})
 
         #Build marker arrows in with spline
-        for arrow in right_arrows + left_arrows:
+        for arrow in arrows:
             msp.add_lwpolyline(arrow, dxfattribs={'layer': "TrackPath_T"+str(t.Track_ID)})
 
         # Every 5th hole draw marker line across

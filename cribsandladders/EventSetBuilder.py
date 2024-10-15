@@ -1506,10 +1506,11 @@ class EventSetBuilder:
                         break
             if not nodesFound: self.eventNodesByTrack.append(dict(tracknum=t['tracknum'], nodes=sortedNodes))
 
+            ctl = len(t['chutes'])/ len(t['ladders'] ) if len(t['ladders']) > 0 else 1.0
+            ltc = len(t['ladders'])/ len(t['chutes'] ) if len(t['chutes']) > 0 else 1.0
+
             print("{} chutes, {} ladders, {} events; ctl: {} ltc: {}".format(len(t['chutes']), len(t['ladders']),
-                                                                             len(t['eventsetbuild']),
-                                                                  len(t['chutes'])/ len(t['ladders']),
-                                                                  len(t['ladders'])/ len(t['chutes'])))
+                                                                             len(t['eventsetbuild']), ctl, ltc))
             print("Two hits: {}".format(t['twohitsthusfar']))
             print("{} nogos, {} denies".format(t['numnogos'], t['numdenies']))
 
