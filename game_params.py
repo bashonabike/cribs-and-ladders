@@ -91,8 +91,8 @@ optmultispct = 0.05
 ##################################################################################################
 #Iterative optimizer params
 changebaseincrperiter = 0.01
-iterscorecutoff = 5
-prescorecutoff = 4
+iterscorecutoff = 20666
+prescorecutoff = 20666
 
 
 
@@ -103,65 +103,6 @@ prescorecutoff = 4
 
 ##################################################################################################
 #DO NOT MODIFY BELOW THIS LINE!!
-#TODO: convert this to OOP
-#Make BOARD file w/ subclasses, pass the board into all the child methods
-#just have gameparams be the non-board related stuff
-# board_xml_file_names = []
-# board_xml_files = []
-# boardnames = []
-# lengths = []
-# twodecklengths = []
-#
-# ladders = []
-# chutes = []
-# laddersbytrack = []
-# chutesbytrack = []
-#
-# for batch in range(batchnum):
-#     board_xml_file_names.append(input("Please enter board xml file path: "))
-#     # parse an xml file by name
-#     board_xml_files.append(minidom.parse(board_xml_file_names[batch]))
-#
-#     # use getElementsByTagName() to get tag
-#     boardnames.append(str(board_xml_files[batch].getElementsByTagName('boardname')[0].firstChild.data).strip("\""))
-#     batch_ladders = []
-#     batch_chutes= []
-#     batch_lengths = []
-#     batch_twodecklengths = []
-#
-#     for track in board_xml_files[batch].getElementsByTagName('track'):
-#         curtrack = int(track.getElementsByTagName('tracknum')[0].firstChild.data)
-#         batch_lengths.append(int(track.getElementsByTagName('length')[0].firstChild.data))
-#         try:
-#             batch_twodecklengths.append(int(track.getElementsByTagName('twodecklength')[0].firstChild.data))
-#         except:
-#             batch_twodecklengths.append(int(track.getElementsByTagName('length')[0].firstChild.data))
-#
-#         for ladder in track.getElementsByTagName('ladder'):
-#             start = int(ladder.getElementsByTagName('start')[0].firstChild.data)
-#             end = int(ladder.getElementsByTagName('end')[0].firstChild.data)
-#             batch_ladders.append((start, end, curtrack))
-#         for chute in board_xml_files[batch].getElementsByTagName('chute'):
-#             start = int(chute.getElementsByTagName('start')[0].firstChild.data)
-#             end = int(chute.getElementsByTagName('end')[0].firstChild.data)
-#             batch_chutes.append((start, end, curtrack))
-#
-#     ladders.append(batch_ladders)
-#     chutes.append(batch_chutes)
-#     lengths.append(batch_lengths)
-#     twodecklengths.append(batch_twodecklengths)
-#
-#     batch_laddersbytrack = []
-#     batch_chutesbytrack = []
-#     for curtrack in range(numplayers):
-#         (batch_laddersbytrack.append(sorted([(start, end) for (start, end, track) in batch_ladders if track in
-#                                              {0, curtrack + 1}], key=lambda e: (e[0], e[1]))))
-#         (batch_chutesbytrack.append(sorted([(start, end) for (start, end, track) in batch_chutes if track in
-#                                             {0, curtrack + 1}], key=lambda e: (e[0], e[1]))))
-#
-#     laddersbytrack.append(batch_laddersbytrack)
-#     chutesbytrack.append(batch_chutesbytrack)
-
 
 flushmods = np.zeros((3, 21), dtype=float).tolist()
 

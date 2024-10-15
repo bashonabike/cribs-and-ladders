@@ -31,6 +31,8 @@ import contextlib
 from collections import defaultdict
 import markovgame as mg
 
+import time
+
 #TODO: curvify lines, order by length in holes, curve it bspline? then iterate out making sure curve does not interfere with any neighbours
 #maybe do this as sep class, once have a board w/ tracks and events established, call Curvify
 #factor in occluded space for logo etc
@@ -52,11 +54,18 @@ class EventSetBuilder:
         self.posPegProbs =  [item["prob"] for item in gp.probPegHist]
         self.pegRounds =  [item["rounds"] for item in gp.probPegRounds]
         self.pegRoundProbs =  [item["prob"] for item in gp.probPegRounds]
-        self.benchmarkMoves_df = None
-        self.track_dict = None
         self.prevEffLengths_starter = [dict(track_id=t.Track_ID, efflength=len(t.trackholes))
                                        for t in self.board.tracks]
         self.avgScoreSum, self.avgScoreDiv, self.avgScore = 0, 0, 0
+
+        #TEMPPP
+        self.miniMarkovTime, self.scoringTime, self.totalTime, self.benchmarkSetupTime = 0, 0, 0, 0
+
+        #Load benchmarks
+        self.benchmarkMoves_df = None
+        self.track_dict = None
+        self.retrieveOrGenerateBenchmarkMoves()
+
 
     def clearEventSet(self):
         self.allTentLengthHisto = []
@@ -169,6 +178,7 @@ class EventSetBuilder:
         self.plot_coordinates_and_vectors()
 
     def retrieveOrGenerateBenchmarkMoves(self):
+        start_time = time.time()
         with contextlib.closing(sql.connect('etc/Optimizer.db')) as sqlConn:
             with sqlConn:
                 with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
@@ -235,6 +245,8 @@ class EventSetBuilder:
         for track_id in self.track_dict:
             for i in range(len(self.track_dict[track_id])):
                 self.track_dict[track_id][i] = [val for val in self.track_dict[track_id][i]]
+        end_time = time.time()
+        self.benchmarkSetupTime += end_time- start_time
 
     def buildPartialSetIntoTrack (self, track, startPoint, stopPoint):
             for e in range(startPoint, stopPoint):
@@ -518,9 +530,12 @@ class EventSetBuilder:
             forecastedTrackEffLengthHoles = trackActualLength*shiftPct
             return forecastedTrackEffLengthHoles, sequencesOfMoves
         else:
+            start_time = time.time()
             forecastedTrackEffLengthHoles = mg.runPartialTrackEffLengthHoles(trackActualLength, gp.probminimodeliters,
                                                                              self.track_dict[track_id],effHoleMap,
                                                                              gp.numplayers, gp.ideallikelihoodholehit)
+            end_time = time.time()
+            self.miniMarkovTime += (end_time - start_time)
             return forecastedTrackEffLengthHoles, None
 
 
@@ -528,6 +543,7 @@ class EventSetBuilder:
                             chutes, chuteBases, chuteTops, ladders, ladderBases, ladderTops, params,trackEventsOverview,
                             explicitEvent = None,
                             explicitChute = False, explicitLadder = False):
+        start_time = time.time()
         if explicitEvent is None and hole.num < t['optfirstchute']: return []
 
         initCompModifier = 0.0
@@ -989,6 +1005,8 @@ class EventSetBuilder:
             t['candcursor'] += 1
 
         eventFitnesses.sort(key=lambda f: f['score'])
+        end_time = time.time()
+        self.scoringTime += end_time - start_time
         if ((len(eventFitnesses) > 0 and eventFitnesses[0]['score'] <= self.avgScore*gp.goodscorecutoffperc*2)
                 or explicitEvent is not None) :
             return eventFitnesses
@@ -1199,6 +1217,7 @@ class EventSetBuilder:
         Intiial flying blind set, no specs known
         """
 
+        start_time = time.time()
         self.board.clearTrackEvents(specificTracks=[t for t in self.board.tracks if not t.instLocked])
         trackEventsOverview = [dict(track=t, trackidx = t.num-1, tracknum=t.num, optevents=0, track_id=t.Track_ID,
                                     optfirstchute=0, trackfilled=False, tracklength=len(t.trackholes),
@@ -1223,9 +1242,6 @@ class EventSetBuilder:
         #Lock out multis if one or more tracks are locked
         if len(trackEventsOverview) != len(self.board.tracks):
             for t in trackEventsOverview: t['nomultis'] = True
-
-        #Load benchmarks
-        self.retrieveOrGenerateBenchmarkMoves()
 
         #Retrieve & normalize energy curve and det integral
         energyCurve, energyNormIntegral = self.getEnergyCurve()
@@ -1532,6 +1548,9 @@ class EventSetBuilder:
                 prevEffLengths[prevEffIdx]['efflength'] = l['efflength']
 
             print("Retry, not good enough board eff length quality\n")
+            end_time = time.time()
+            self.totalTime += end_time - start_time
+
             return False
 
 
@@ -1585,6 +1604,14 @@ class EventSetBuilder:
 
 
         # return len([t for t in trackEventsOverview if not t['trackfilled']]) == 0
+        end_time = time.time()
+        self.totalTime += end_time - start_time
+        totMarkov = self.miniMarkovTime/self.totalTime
+        totScore = self.scoringTime/self.totalTime
+        totBench = self.benchmarkSetupTime/self.totalTime
+        print("Minimarkov took up %s" % totMarkov)
+        print("Scoring took up %s" % totScore)
+
         return True
 
     def testPlotVectorsOnHoles(self, vectors):

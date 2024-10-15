@@ -251,10 +251,10 @@ if __name__ == "__main__":
     # checkBoardBestTrial(1, 807)
     # genTrainSet()
 
-    routines = Routines(optimizerRunSet=6)
+    routines = Routines(optimizerRunSet=7)
     # routines.runNormalCribGame(debug=False)
     routines.setUpBoard(homoRisk = False)
-    bestIterParams = routines.runIter(debug=False)
+    bestIterParams = routines.runIter(debug=True)
     print(bestIterParams)
     # bestFminParams = routines.runFmin()
     # print(bestFminParams)
