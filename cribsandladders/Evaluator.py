@@ -198,6 +198,13 @@ class Evaluator:
                                      ResultValue=self.stats.repeats/len(self.moves) if len(self.moves) > 0 else 1,
                                      Weighting=400))
 
+            #Calculate skew of chutes or ladders hit as compared to tot # events hit
+            laddersHit = len([m for m in self.moves if m.hasEvent and m.ladderorchuteamt > 0])
+            chutesHit = len([m for m in self.moves if m.hasEvent and m.ladderorchuteamt < 0])
+            skewEvents = 0 if laddersHit + chutesHit == 0 else abs(laddersHit - chutesHit)/(laddersHit + chutesHit)
+            self.results.append(dict(Result="eventshitskew", ResultFlavour="GAMEPLAY SCALAR STATS",
+                                     ResultValue=skewEvents, Weighting=1))
+
             #GAMEPLAY STATISTICAL STATS (lol)
             moves_df = pd.DataFrame.from_records([dict(movenum=m.movenum, trial=m.trial) for m in self.moves])
             movesPerTrial_df = moves_df[['trial']].assign(moves=1).groupby('trial').agg('sum').reset_index()
