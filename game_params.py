@@ -50,11 +50,14 @@ mincrowvectordistcancel = 12 #mm, since straight line approx this equates to ~15
 whenstartworryingaboutcancels = 3 #After this many cancels on a track, start impeding
 probminimodeliters = 500
 allowabletwohits = 1
+maxtwohitnetgainloss = 15
 randomfeatheringamount = 13 #Nix holes randomly at nth interval to avoid endless opt loops
 maxefflengthdisp = 14
 goodscorecutoffperc = 0.5 #percent, keep well below 1.0
 gamelengthtightness = 4  #This is exponent mantissa, probably best keep below 6, should be int for perf
 idealcancelspct = 0.25
+finishlinelength = 20 #Number of holes that can be left free from events at end
+# (ideally stick these bits in parallel on board so all trax side by side)
 
 #OPTIMIZER BOUNDING PARAMS
 maxeventsetfinesseiters = 10

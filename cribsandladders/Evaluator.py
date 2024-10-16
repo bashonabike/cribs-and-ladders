@@ -108,7 +108,7 @@ class Evaluator:
             track = self.board.getTrackByNum(n['tracknum'])
             track_id = track.Track_ID
             maxNode = max(n['nodes'])
-            termPct = maxNode/track.length
+            termPct = min(maxNode/(track.length - gp.finishlinelength), 1.0)
             self.results.append(dict(Result="earlytermination_T{}".format(track_id), ResultFlavour="GAMEPLAY SCALAR STATS",
                                  ResultValue=1.0-termPct, Weighting=8))
 

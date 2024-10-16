@@ -855,40 +855,93 @@ class EventSetBuilder:
                 # Check for two-hits
                 numTwoHits = 0
                 numTwoHitsLoose = 0
+                twoHitNetLengths = []
+
+                # def getTwoHitNetLength(p, chutesOrLadders, searchHoleNum, foundHoleType, eventLength):
+                #     for l in chutesOrLadders:
+                #         if l[foundHoleType] == searchHoleNum + p:
+                #             return l['length'] + eventLength
+                #     return 0
+
                 if instType in (en.InstanceEventType.LADDERONLY, en.InstanceEventType.CHUTEANDLADDER):
                     for p in (1, 2 ,4):
                         if self.searchOrderedListForVal(ladderBases, candEventSpecs['event'].endHole.num + p) > -1:
                             if abs(p) == 4: numTwoHitsLoose += 1
-                            else: numTwoHits += 1
+                            else:
+                                numTwoHits += 1
+                                for l in ladders:
+                                    if l['ladderbase'] == candEventSpecs['event'].endHole.num + p:
+                                        twoHitNetLengths.append(l['length'] + candEventSpecs['event'].length)
+                                        break
                         if self.searchOrderedListForVal(chuteTops, candEventSpecs['event'].endHole.num + p) > -1:
                             if abs(p) == 4: numTwoHitsLoose += 1
-                            else: numTwoHits += 1
+                            else:
+                                numTwoHits += 1
+                                for c in chutes:
+                                    if c['chutetop'] == candEventSpecs['event'].endHole.num + p:
+                                        twoHitNetLengths.append(candEventSpecs['event'].length - c['length'])
+                                        break
                     for p in (-1, -2 ,-4):
                         if self.searchOrderedListForVal(ladderTops, candEventSpecs['event'].startHole.num + p) > -1:
                             if abs(p) == 4: numTwoHitsLoose += 1
-                            else: numTwoHits += 1
+                            else:
+                                numTwoHits += 1
+                                for l in ladders:
+                                    if l['laddertop'] == candEventSpecs['event'].startHole.num + p:
+                                        twoHitNetLengths.append(candEventSpecs['event'].length + l['length'])
+                                        break
                         if self.searchOrderedListForVal(chuteBases, candEventSpecs['event'].startHole.num + p) > -1:
                             if abs(p) == 4: numTwoHitsLoose += 1
-                            else: numTwoHits += 1
+                            else:
+                                numTwoHits += 1
+                                for c in chutes:
+                                    if c['chutebase'] == candEventSpecs['event'].startHole.num + p:
+                                        twoHitNetLengths.append(candEventSpecs['event'].length - c['length'])
+                                        break
                 if instType in (en.InstanceEventType.CHUTEONLY, en.InstanceEventType.CHUTEANDLADDER):
                     for p in (1, 2, 4):
                         if self.searchOrderedListForVal(ladderBases, candEventSpecs['event'].startHole.num + p) > -1:
                             if abs(p) == 4: numTwoHitsLoose += 1
-                            else: numTwoHits += 1
+                            else:
+                                numTwoHits += 1
+                                for l in ladders:
+                                    if l['ladderbase'] == candEventSpecs['event'].startHole.num + p:
+                                        twoHitNetLengths.append(l['length'] - candEventSpecs['event'].length)
+                                        break
                         if self.searchOrderedListForVal(chuteTops, candEventSpecs['event'].startHole.num + p) > -1:
                             if abs(p) == 4: numTwoHitsLoose += 1
-                            else: numTwoHits += 1
+                            else:
+                                numTwoHits += 1
+                                for c in chutes:
+                                    if c['chutetop'] == candEventSpecs['event'].startHole.num + p:
+                                        twoHitNetLengths.append((-1)*c['length'] - candEventSpecs['event'].length)
+                                        break
                     for p in (-1, -2, -4):
                         if self.searchOrderedListForVal(ladderTops, candEventSpecs['event'].endHole.num + p) > -1:
                             if abs(p) == 4: numTwoHitsLoose += 1
-                            else: numTwoHits += 1
+                            else:
+                                numTwoHits += 1
+                                for l in ladders:
+                                    if l['laddertop'] == candEventSpecs['event'].endHole.num + p:
+                                        twoHitNetLengths.append(l['length'] - candEventSpecs['event'].length)
+                                        break
                         if self.searchOrderedListForVal(chuteBases, candEventSpecs['event'].endHole.num + p) > -1:
                             if abs(p) == 4: numTwoHitsLoose += 1
-                            else: numTwoHits += 1
+                            else:
+                                numTwoHits += 1
+                                for c in chutes:
+                                    if c['chutebase'] == candEventSpecs['event'].endHole.num + p:
+                                        twoHitNetLengths.append((-1)*c['length'] - candEventSpecs['event'].length)
+                                        break
+
+                if len(twoHitNetLengths) > 0 and (min(twoHitNetLengths) < (-1)*gp.maxtwohitnetgainloss or
+                                                  max(twoHitNetLengths) > gp.maxtwohitnetgainloss):
+                    continue
 
                 if (numTwoHits > 0 and numTwoHits*params.tryGetParam(t['track_id'], 'twohitfreqimpedance') >
                         (gp.allowabletwohits - t['twohitsthusfar'])):
                     continue
+
                 curScore *= (1.0 + (numTwoHits + numTwoHitsLoose/2)*t['twohitsthusfar']*
                              params.tryGetParam(t['track_id'], 'twohitfreqimpedance'))
 
@@ -1416,7 +1469,8 @@ class EventSetBuilder:
                         t['curestefflength'] = idealEventWithFitness['estefflength']
                         if idealEventWithFitness['instchute']:
                             t['chutes'].append(dict(chutetop=idealEventWithFitness['eventspecs']['eventtop'],
-                                                     length=idealEventWithFitness['eventspecs']['length']))
+                                                    chutebase=idealEventWithFitness['eventspecs']['eventbase'],
+                                                    length=idealEventWithFitness['eventspecs']['length']))
                             t['chutes'].sort(key=lambda l: l['chutetop'])
                             t['chutebases'].append(idealEventWithFitness['eventspecs']['eventbase'])
                             t['chutebases'].sort()
@@ -1427,6 +1481,7 @@ class EventSetBuilder:
                         t['eventnodes'].sort()
                         if idealEventWithFitness['instladder']:
                             t['ladders'].append(dict(ladderbase=idealEventWithFitness['eventspecs']['eventbase'],
+                                                     laddertop=idealEventWithFitness['eventspecs']['eventtop'],
                                                      length=idealEventWithFitness['eventspecs']['length']))
                             t['ladders'].sort(key=lambda l: l['ladderbase'])
                             t['ladderbases'].append(idealEventWithFitness['eventspecs']['eventbase'])
