@@ -3,6 +3,7 @@ import numpy as np
 import random as rd
 from datetime import datetime
 import os
+import matplotlib.pyplot as plt
 
 def convert_mm_to_in(coordinate_list):
     """
@@ -113,15 +114,21 @@ def compute_offset_curve(points, offset_distance, proximityThresh):
         left_curve.append((aug_points[i] + perp_vector).tolist())
         right_curve.append((aug_points[i] - perp_vector).tolist())
 
-        if (i%7 == 0 and i%5 != 0) or ((i - 1)%5 == 0 and (i - 1)%7 == 0):
+        if i > 1 and ((i%7 == 0 and i%5 != 0) or ((i - 1)%5 == 0 and (i - 1)%7 == 0)):
+            # Det arrow directional vector
+            arrow_dir_vector = aug_points[i + 1] - aug_points[i]
+            arrow_dir_vector /= np.linalg.norm(arrow_dir_vector)
+
             # Det arrow start point
-            arrow_head = aug_points[i] + (3/25.4)*direction_vector
+            arrow_base = aug_points[i] + (2/25.4)*arrow_dir_vector
+            arrow_head = aug_points[i] + (4/25.4)*arrow_dir_vector
 
             # Build arrow unit vectors
-            left_arrow_vect = rotate_vector_2d((-1)*direction_vector, -20)*0.15
-            right_arrow_vect = rotate_vector_2d((-1)*direction_vector, 20)*0.15
+            left_arrow_vect = rotate_vector_2d((-1)*arrow_dir_vector, -30)*0.05
+            right_arrow_vect = rotate_vector_2d((-1)*arrow_dir_vector, 30)*0.05
 
             # Build vectors and append to lists
+            arrows.append([arrow_base.tolist(), arrow_head.tolist()])
             arrows.append([arrow_head.tolist(), (arrow_head + left_arrow_vect).tolist()])
             arrows.append([arrow_head.tolist(), (arrow_head + right_arrow_vect).tolist()])
 
@@ -234,8 +241,40 @@ def buildDXFFile(board):
         #Add starter holes + circumference
         msp.add_circle([0, t.num*0.2], holeRadius, dxfattribs={'layer': "Holes_T"+str(t.Track_ID)})
         msp.add_circle([6/25.4, t.num*0.2], holeRadius, dxfattribs={'layer': "Holes_T"+str(t.Track_ID)})
-        msp.add_ellipse([3/25.4, t.num*0.2], [9/25.4, t.num*0.2], 0.5,
-                        dxfattribs={'layer': "TrackPath_T"+str(t.Track_ID)})
+        rev, starter_circ_points, numincrs, cornercuts = False, [], 9, 2
+        x_cur, y_cur = 6/25.4 + 0.16, t.num * 0.2 + 0.16
+        for x in [-0.16, 6/25.4 + 0.16]:
+            if rev:
+                y_vals = [t.num*0.2 - 0.16, t.num*0.2 + 0.16]
+            else:
+                y_vals = [t.num * 0.2 + 0.16, t.num * 0.2 - 0.16]
+            for y in y_vals:
+                x_incr, y_incr = (x - x_cur)/numincrs, (y - y_cur)/numincrs
+                for i in range(numincrs - cornercuts): #Don't plot corner, round them off
+                    x_cur += x_incr
+                    y_cur += y_incr
+                    if i >= (cornercuts - 1): starter_circ_points.append((x_cur, y_cur))
+                x_cur, y_cur = x, y #Set to target corner
+            rev = not rev
+        starter_circ_points.append(starter_circ_points[0])
+
+        x_vals, y_vals = zip(*starter_circ_points)
+
+        # Create a plot
+        plt.plot(x_vals, y_vals, marker='o')
+
+        # Add labels and title
+        plt.xlabel('X values')
+        plt.ylabel('Y values')
+        plt.title('Plot of (x, y) Coordinates')
+
+        # Show the plot
+        plt.show()
+        plt.waitforbuttonpress()
+        plt.close()
+
+        circSpline = msp.add_spline(starter_circ_points, dxfattribs={'layer': "TrackPath_T"+str(t.Track_ID)})
+        circSpline.closed = True
 
     #Add shared finish hole
     doc.layers.add(name="Holes_Finish", color=rd.randint(1,30), linetype="DASHED")
