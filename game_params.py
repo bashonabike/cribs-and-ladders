@@ -27,7 +27,7 @@ numtrials = 1000
 nummaxthreads = 2
 #OPTIONAL run multiple boards in a batch
 batchnum = 1
-boardname = "Micro Board 2"
+boardname = "Micro Board 4"
 
 #Set if seeking optimal events layout
 findmode = True
@@ -55,7 +55,7 @@ randomfeatheringamount = 13 #Nix holes randomly at nth interval to avoid endless
 maxefflengthdisp = 14
 goodscorecutoffperc = 0.5 #percent, keep well below 1.0
 gamelengthtightness = 4  #This is exponent mantissa, probably best keep below 6, should be int for perf
-idealcancelspct = 0.25
+idealcancelspct = 0.55
 finishlinelength = 20 #Number of holes that can be left free from events at end
 # (ideally stick these bits in parallel on board so all trax side by side)
 
@@ -94,8 +94,9 @@ optmultispct = 0.05
 ##################################################################################################
 #Iterative optimizer params
 changebaseincrperiter = 0.01
-iterscorecutoff = 20666
-prescorecutoff = 20666
+iterscorecutoff = 4
+prescorecutoff = 4
+maxnumitermodeliters = 1000
 
 
 

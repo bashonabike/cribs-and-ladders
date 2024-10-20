@@ -21,49 +21,51 @@ double runPartialTrackEffLengthHoles(
     int trackActualLength,
     int probminimodeliters,
     const std::vector<std::vector<int>>& curReadSeqs,
+	const std::vector<int>& trialNumMoves,
     const std::vector<int>& effHoleMap,
     int numplayers,
     double ideallikelihoodholehit) {
 
     // Simulation
-    int movesAllTrials = 0;
+    long movesAllTrials = 0;
     int iters = probminimodeliters;
     int moveCounter = 0;
 
     for (int trial = 0; trial < iters; ++trial) {
         // Trial Gameplay setup
-        moveCounter = 0;
-        // int dealer = rand() % numplayers + 1;
         int curPos = 0;
+        // int dealer = rand() % numplayers + 1;
         int countLoops = 0;
         // std::vector<int> curReadSeq = curReadSeqs[trial];
 
         while (curPos <= trackActualLength) {
-            // Get current move
-            // int curMove = curReadSeq[moveCounter];
-            int curMove = curReadSeqs[trial][moveCounter];
-            if (moveCounter == 0) {
-                countLoops++;
-            }
-            // moveCounter = (moveCounter + 1) % curReadSeq.size();
-            moveCounter = (moveCounter + 1) % curReadSeqs[trial].size();
+			for (int moveCounter = 0; moveCounter < trialNumMoves[trial]; moveCounter++) {
+				// Get current move
+				// int curMove = curReadSeq[moveCounter];
+				int curMove = curReadSeqs[trial][moveCounter];
+				
+				 //moveCounter = (moveCounter + 1) % curReadSeq.size();
+				//moveCounter = (moveCounter + 1) % trialNumMoves[trial];
 
-            // Move player
-            if (curPos + curMove > effHoleMap.size()) {
-                curPos += curMove;
-            }
-            else {
-                curPos = effHoleMap[curPos + curMove];
-            }
+				// Move player
+				if (curPos + curMove >= effHoleMap.size()) {
+					curPos += curMove;
+				}
+				else {
+					curPos = effHoleMap[curPos + curMove];
+				}
 
-            movesAllTrials++;
+				movesAllTrials++;
 
-            // Check for infinite loops
-            if (countLoops > 10) {
-                return 9999999;
-            }
+				if (curPos > trackActualLength) break;
+			}
+			
+			countLoops++;
 
-            if (curPos > trackActualLength) break;
+			// Check for infinite loops (usually result of a ladder and chute sending one back and forth)
+			if (countLoops > 1000) {
+				return 9999999;
+			}
         }
     }
 

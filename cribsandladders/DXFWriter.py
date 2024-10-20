@@ -142,14 +142,14 @@ def compute_offset_curve(points, offset_distance, proximityThresh):
     right_curve = remove_close_coordinates(right_curve, aug_points, threshold=proximityThresh)
 
     #Check proximity to neighbours, if too close set each to midpoint of each other
-    left_curve = adjust_close_points(left_curve, threshold=proximityThresh)
-    right_curve = adjust_close_points(right_curve, threshold=proximityThresh)
+    left_curve = adjust_close_points(left_curve, threshold=proximityThresh - 0.050)
+    right_curve = adjust_close_points(right_curve, threshold=proximityThresh - 0.05)
 
     #Run 2nd time to clean up
     left_curve = remove_close_coordinates(left_curve, aug_points, threshold=proximityThresh)
     right_curve = remove_close_coordinates(right_curve, aug_points, threshold=proximityThresh)
-    left_curve = adjust_close_points(left_curve, threshold=proximityThresh)
-    right_curve = adjust_close_points(right_curve, threshold=proximityThresh)
+    left_curve = adjust_close_points(left_curve, threshold=proximityThresh - 0.05)
+    right_curve = adjust_close_points(right_curve, threshold=proximityThresh - 0.05)
 
     return left_curve, right_curve, arrows
 
@@ -223,7 +223,7 @@ def buildDXFFile(board):
 
         #Build in spline following along either side of each track
         right_curve, left_curve, arrows =\
-            compute_offset_curve(np.array(holes_in), 0.16, 0.127)
+            compute_offset_curve(np.array(holes_in), 0.12, 0.115)
         doc.layers.add(name="TrackPath_T"+str(t.Track_ID), color=rd.randint(1,30), linetype="DOTTED")
         msp.add_spline(right_curve, dxfattribs={'layer': "TrackPath_T"+str(t.Track_ID)})
         msp.add_spline(left_curve, dxfattribs={'layer': "TrackPath_T"+str(t.Track_ID)})
@@ -234,7 +234,7 @@ def buildDXFFile(board):
 
         # Every 5th hole draw marker line across
         doc.layers.add(name="NumMarks_T" + str(t.Track_ID), color=rd.randint(1, 30), linetype="DOTTED")
-        slashVectors = create_progress_marker_vectors(np.array(holes_in), 0.35) #NOTE this should be 2x offset dist of spline
+        slashVectors = create_progress_marker_vectors(np.array(holes_in), 0.24) #NOTE this should be 2x offset dist of spline
         for s in slashVectors:
             msp.add_lwpolyline(s, dxfattribs={'layer': "NumMarks_T"+str(t.Track_ID)})
 
@@ -257,21 +257,21 @@ def buildDXFFile(board):
                 x_cur, y_cur = x, y #Set to target corner
             rev = not rev
         starter_circ_points.append(starter_circ_points[0])
-
-        x_vals, y_vals = zip(*starter_circ_points)
-
-        # Create a plot
-        plt.plot(x_vals, y_vals, marker='o')
-
-        # Add labels and title
-        plt.xlabel('X values')
-        plt.ylabel('Y values')
-        plt.title('Plot of (x, y) Coordinates')
-
-        # Show the plot
-        plt.show()
-        plt.waitforbuttonpress()
-        plt.close()
+        #
+        # x_vals, y_vals = zip(*starter_circ_points)
+        #
+        # # Create a plot
+        # plt.plot(x_vals, y_vals, marker='o')
+        #
+        # # Add labels and title
+        # plt.xlabel('X values')
+        # plt.ylabel('Y values')
+        # plt.title('Plot of (x, y) Coordinates')
+        #
+        # # Show the plot
+        # plt.show()
+        # plt.waitforbuttonpress()
+        # plt.close()
 
         circSpline = msp.add_spline(starter_circ_points, dxfattribs={'layer': "TrackPath_T"+str(t.Track_ID)})
         circSpline.closed = True
@@ -280,7 +280,24 @@ def buildDXFFile(board):
     doc.layers.add(name="Holes_Finish", color=rd.randint(1,30), linetype="DASHED")
     msp.add_circle(convert_mm_to_in([(board.width, board.height)])[0], holeRadius, dxfattribs={'layer': "Holes_Finish"})
 
-    #Build in events
+    # Arrow to shared finish hole
+    doc.layers.add(name="TrackPath_ALL", color=rd.randint(1,30), linetype="DOTTED")
+    arrow_head = np.array(convert_mm_to_in([(board.width-4, board.height)])[0])
+    arrow_base = arrow_head - np.array([(2 / 25.4), 0])
+    arrow_dir_vector = (arrow_head - arrow_base) / np.linalg.norm((arrow_head - arrow_base))
+
+    # Build arrow unit vectors
+    left_arrow_vect = rotate_vector_2d((-1) * arrow_dir_vector, -30) * 0.05
+    right_arrow_vect = rotate_vector_2d((-1) * arrow_dir_vector, 30) * 0.05
+
+    # Build vectors and print lines into layer
+    msp.add_lwpolyline([arrow_base.tolist(), arrow_head.tolist()], dxfattribs={'layer': "TrackPath_ALL"})
+    msp.add_lwpolyline([arrow_head.tolist(), (arrow_head + left_arrow_vect).tolist()],
+                       dxfattribs={'layer': "TrackPath_ALL"})
+    msp.add_lwpolyline([arrow_head.tolist(), (arrow_head + right_arrow_vect).tolist()],
+                       dxfattribs={'layer': "TrackPath_ALL"})
+
+    # Build in events
     for t in board.tracks:
         doc.layers.add(name="NormEvents_T" + str(t.Track_ID), color=rd.randint(1, 30), linetype="DASHED")
         doc.layers.add(name="RampUpEvents_T" + str(t.Track_ID), color=rd.randint(1, 30), linetype="DASHED")

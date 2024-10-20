@@ -22,6 +22,7 @@ import time
 import mystic
 from mystic.solvers import fmin
 from mystic.monitors import VerboseMonitor
+import copy as cp
 
 #NOTE: this is outside tha class called staticly to avoic sql pickling issues (Optimizer & Eval have stored conns)
 def trialsPerThread(board, squad, threadNum, trialsOnThread):
@@ -188,6 +189,8 @@ class Routines:
     def runIter(self, debug=False):
         sqlOptimizerCon = sql.connect("etc/Optimizer")
         weighedScoring = 9999999
+        freshParams = None
+        bestIterScore, bestRun, bestParams = 999999, -1, None
         self.eventSetBuilder.runMidpointInitParams(self.optimizerRunSet, self.optimizerRun)
         while weighedScoring > gp.iterscorecutoff:
             weighedPreScoring = 999999
@@ -222,9 +225,21 @@ class Routines:
             self.eventSetBuilder.paramSet.tempWriteMetricsToDb(eval)
             # self.eventSetBuilder.paramSet.tempWriteEvents(stats, self.optimizerRunSet, self.optimizerRun)
             weighedScoring = self.optimizer.detWeighedScoring(eval.results)
+            if weighedScoring < bestIterScore:
+                bestParams = cp.deepcopy(freshParams)
+                bestIterScore = weighedScoring
+                bestRun = self.optimizerRun - 1
             print(weighedScoring)
+
             if weighedScoring <= gp.iterscorecutoff:
                 self.optimizer.setBestIterParams(self.eventSetBuilder.paramSet.params)
+                break
+
+            elif self.optimizerRun >= gp.maxnumitermodeliters:
+                self.optimizer.setBestIterParams(bestParams)
+                print("Hit max # iters, reverting to best score thus far of " + str(bestIterScore))
+                self.eventSetBuilder.buildBoardFromParams(pd.DataFrame.from_records(bestParams),
+                                                      self.optimizerRunSet, bestRun)
                 break
 
             self.optimizerRun += 1
@@ -251,10 +266,10 @@ if __name__ == "__main__":
     # checkBoardBestTrial(1, 807)
     # genTrainSet()
 
-    routines = Routines(optimizerRunSet=7)
+    routines = Routines(optimizerRunSet=9)
     # routines.runNormalCribGame(debug=False)
     routines.setUpBoard(homoRisk = False)
-    bestIterParams = routines.runIter(debug=True)
+    bestIterParams = routines.runIter(debug=False)
     print(bestIterParams)
     # bestFminParams = routines.runFmin()
     # print(bestFminParams)

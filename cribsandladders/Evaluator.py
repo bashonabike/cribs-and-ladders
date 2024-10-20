@@ -69,8 +69,11 @@ class Evaluator:
         # sqlcon2.commit()
         # metricsQuery_sb.close()
         for record in self.results:
-            print("RUN {}: Result={}, ResultFlavour={}, ResultValue={}".format(
-                self.optimizerRun, record['Result'], record['ResultFlavour'], record['ResultValue']))
+            try:
+                print("RUN {}: Result={}, ResultFlavour={}, ResultValue={}".format(
+                    self.optimizerRun, record['Result'], record['ResultFlavour'], record['ResultValue']))
+            except Exception as e:
+                print(e)
 
 
 

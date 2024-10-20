@@ -531,8 +531,11 @@ class EventSetBuilder:
             return forecastedTrackEffLengthHoles, sequencesOfMoves
         else:
             start_time = time.time()
+            test = [len(t) for t in self.track_dict[track_id]]
             forecastedTrackEffLengthHoles = mg.runPartialTrackEffLengthHoles(trackActualLength, gp.probminimodeliters,
-                                                                             self.track_dict[track_id],effHoleMap,
+                                                                             self.track_dict[track_id],
+                                                                             [len(t) for t in self.track_dict[track_id]],
+                                                                             effHoleMap,
                                                                              gp.numplayers, gp.ideallikelihoodholehit)
             end_time = time.time()
             self.miniMarkovTime += (end_time - start_time)
@@ -750,6 +753,8 @@ class EventSetBuilder:
                                                                                              candEventSpecs['event'].startHole.num),
                                                                                readMode=True)[0]
 
+                # Infinite looping observed!!  Not a good set
+                if effLengthForecast >= 9999999: continue
                 # Adjust length as per control length
                 effLengthForecast *= t['tracklength']/t['controllength']
                 #NOTE: impeders are (-), boosters are (+)
@@ -1327,6 +1332,9 @@ class EventSetBuilder:
             t['controllength'] = self.runPartialTrackEffLengthHoles(t['track_id'], [],
                                                                                 t['tracklength'],
                                                                                      readMode=True)[0]
+            if t['controllength']  == 9999999:
+                raise Exception("Failed initial control length")
+                sdfsd=""
 
             # Create track-specific energy curve
             candEventSpecs = [dict(event=c, isshared=c.isShared, eventtop=c.endHole.num, eventbase=c.startHole.num,
