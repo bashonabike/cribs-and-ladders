@@ -190,7 +190,9 @@ class Routines:
         sqlOptimizerCon = sql.connect("etc/Optimizer")
         weighedScoring = 9999999
         freshParams = None
-        bestIterScore, bestRun, bestParams = 999999, -1, None
+        bestIterScore, bestRun, bestParams, bestEventSet = 999999, -1, None, None
+        boardSettingStalled = False
+        curEventSet = None
         self.eventSetBuilder.runMidpointInitParams(self.optimizerRunSet, self.optimizerRun)
         while weighedScoring > gp.iterscorecutoff:
             weighedPreScoring = 999999
@@ -211,41 +213,51 @@ class Routines:
 
                 self.optimizerRun += 1
                 freshParams = self.optimizer.runIncrIteration(self.eventSetBuilder.paramSet.params, evalPre.results)
-                self.eventSetBuilder.buildBoardFromParams(pd.DataFrame.from_records(freshParams),
+                curEventSet = self.eventSetBuilder.buildBoardFromParams(pd.DataFrame.from_records(freshParams),
                                                           self.optimizerRunSet, self.optimizerRun)
+                boardSettingStalled = curEventSet is None
+                if boardSettingStalled: break
+            if boardSettingStalled: break
 
+            if not boardSettingStalled:
+                self.optimizerRun += 1
+                stats = crst.Stats(self.board, self.squad, self.optimizerRunSet, self.optimizerRun)
+                self.run_trials(self.board, self.squad, stats, debug)
+                eval = evl.Evaluator(self.eventSetBuilder, self.board, self.posevents, stats, sqlOptimizerCon,
+                                     self.optimizerRunSet, self.optimizerRun)
+                eval.detMetrics()
+                eval.writeMetricsToDb()
+                self.eventSetBuilder.paramSet.tempWriteMetricsToDb(eval)
+                # self.eventSetBuilder.paramSet.tempWriteEvents(stats, self.optimizerRunSet, self.optimizerRun)
+                weighedScoring = self.optimizer.detWeighedScoring(eval.results)
+                if weighedScoring < bestIterScore:
+                    bestParams = cp.deepcopy(freshParams)
+                    bestIterScore = weighedScoring
+                    bestEventSet = cp.deepcopy(curEventSet)
+                    bestRun = self.optimizerRun
+                print(weighedScoring)
 
-            self.optimizerRun += 1
-            stats = crst.Stats(self.board, self.squad, self.optimizerRunSet, self.optimizerRun)
-            self.run_trials(self.board, self.squad, stats, debug)
-            eval = evl.Evaluator(self.eventSetBuilder, self.board, self.posevents, stats, sqlOptimizerCon,
-                                 self.optimizerRunSet, self.optimizerRun)
-            eval.detMetrics()
-            eval.writeMetricsToDb()
-            self.eventSetBuilder.paramSet.tempWriteMetricsToDb(eval)
-            # self.eventSetBuilder.paramSet.tempWriteEvents(stats, self.optimizerRunSet, self.optimizerRun)
-            weighedScoring = self.optimizer.detWeighedScoring(eval.results)
-            if weighedScoring < bestIterScore:
-                bestParams = cp.deepcopy(freshParams)
-                bestIterScore = weighedScoring
-                bestRun = self.optimizerRun - 1
-            print(weighedScoring)
+                if weighedScoring <= gp.iterscorecutoff:
+                    self.optimizer.setBestIterParams(self.eventSetBuilder.paramSet.params)
+                    break
 
-            if weighedScoring <= gp.iterscorecutoff:
-                self.optimizer.setBestIterParams(self.eventSetBuilder.paramSet.params)
-                break
-
-            elif self.optimizerRun >= gp.maxnumitermodeliters:
+            if self.optimizerRun >= gp.maxnumitermodeliters or boardSettingStalled:
                 self.optimizer.setBestIterParams(bestParams)
-                print("Hit max # iters, reverting to best score thus far of " + str(bestIterScore))
-                self.eventSetBuilder.buildBoardFromParams(pd.DataFrame.from_records(bestParams),
-                                                      self.optimizerRunSet, bestRun)
+                print("Hit max # iters, reverting to best score thus far of " + str(bestIterScore) +
+                      " in run #" + str(bestRun))
+                self.eventSetBuilder.buildExplicitSetIntoEvents(bestEventSet)
                 break
 
             self.optimizerRun += 1
             freshParams = self.optimizer.runIncrIteration(self.eventSetBuilder.paramSet.params, eval.results)
-            self.eventSetBuilder.buildBoardFromParams(pd.DataFrame.from_records(freshParams),
+            curEventSet = self.eventSetBuilder.buildBoardFromParams(pd.DataFrame.from_records(freshParams),
                                                       self.optimizerRunSet, self.optimizerRun)
+            boardSettingStalled = curEventSet is None
+            if boardSettingStalled:
+                self.optimizer.setBestIterParams(bestParams)
+                print("Hit max # iters, reverting to best score thus far of " + str(bestIterScore))
+                self.eventSetBuilder.buildExplicitSetIntoEvents(bestEventSet)
+                break
 
         sqlOptimizerCon.close()
         dxf.buildDXFFile(self.board)
@@ -266,7 +278,7 @@ if __name__ == "__main__":
     # checkBoardBestTrial(1, 807)
     # genTrainSet()
 
-    routines = Routines(optimizerRunSet=9)
+    routines = Routines(optimizerRunSet=11)
     # routines.runNormalCribGame(debug=False)
     routines.setUpBoard(homoRisk = False)
     bestIterParams = routines.runIter(debug=False)

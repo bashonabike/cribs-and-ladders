@@ -47,23 +47,24 @@ maxladderlength = 20
 eventminspacing = 5 #mm
 maxeventlineext = 100
 mincrowvectordistcancel = 12 #mm, since straight line approx this equates to ~15mm curvy, need room to discernibly add lump on 1 side
-whenstartworryingaboutcancels = 3 #After this many cancels on a track, start impeding
+whenstartworryingaboutcancels = 12 #After this many cancels on a track, start impeding
 probminimodeliters = 500
-allowabletwohits = 1
-maxtwohitnetgainloss = 15
-randomfeatheringamount = 13 #Nix holes randomly at nth interval to avoid endless opt loops
-maxefflengthdisp = 14
+allowabletwohits = 4
+onlysamedirtwohits = True
+maxtwohitnetgainloss = 25
+randomfeatheringamount = 9 #Nix holes randomly at nth interval to avoid endless opt loops
+maxefflengthdisp = 24
 goodscorecutoffperc = 0.5 #percent, keep well below 1.0
-gamelengthtightness = 4  #This is exponent mantissa, probably best keep below 6, should be int for perf
-idealcancelspct = 0.55
+gamelengthtightness = 5  #This is exponent mantissa, probably best keep below 6, should be int for perf
+idealcancelspct = 0.75
 finishlinelength = 20 #Number of holes that can be left free from events at end
 # (ideally stick these bits in parallel on board so all trax side by side)
 
 #OPTIMIZER BOUNDING PARAMS
 maxeventsetfinesseiters = 10
 maxeventsettrials = 100
-maxitersconvergeoneventtrialset = 200
-maxitertrynewbuild = 200
+maxitersconvergeoneventtrialset = 400
+maxitertrynewbuild = 400
 maxitertrackstalled = 20
 minqualityboardlengthmatching = 1.5 #Try to get within this many holes of ideal
 minqualityboardlengthintervalsrpt = 0.005

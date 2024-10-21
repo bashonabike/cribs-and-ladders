@@ -168,11 +168,12 @@ class EventSetBuilder:
         while not self.tryEventSet(self.paramSet, prevEffLengths):
             builditer += 1
             if builditer > gp.maxitertrynewbuild:
-                raise Exception(
-                    "Passed max # iters ({}) to find an event set.  ".format(gp.maxitertrynewbuild) +
+                print("Passed max # iters ({}) to find an event set.  ".format(gp.maxitertrynewbuild) +
                     "This board may not be feasible.  Try adding more folds in the tracks")
+                return None
         self.paramSet.tempInsertParamsDb(optimizerRunSet, optimizerRun)
         self.buildSetIntoEvents()
+        return [t.eventSetBuild for t in self.board.tracks]
 
     def plotBoard(self):
         self.plot_coordinates_and_vectors()
@@ -699,17 +700,22 @@ class EventSetBuilder:
                 # canBeLadder = candEventSpecs['canbeladder'] and explicitLadder
                 canBeLadder = explicitLadder
 
+            canBeLadderOnly, canBeChuteOnly = canBeLadder, canBeChute
             #Check if can be chute only
-            if explicitEvent is None and (canBeChute and not canBeLadder and len(ladderBases)/(len(chuteBases) + 1)
+            if explicitEvent is None and (canBeChute and len(ladderBases)/(len(chuteBases) + 1)
                     < params.tryGetParam(t['track_id'], "minladdertochuteratio")):
-                t['candcursor'] += 1
-                continue
+                canBeChuteOnly = False
+                if not canBeLadder:
+                    t['candcursor'] += 1
+                    continue
 
             #Check if can be ladder only
-            if explicitEvent is None and (canBeLadder and not canBeChute and len(chuteBases)/(len(ladderBases) + 1)
+            if explicitEvent is None and (canBeLadder and len(chuteBases)/(len(ladderBases) + 1)
                 < params.tryGetParam(t['track_id'], "minchutetoladderratio")):
-                t['candcursor'] += 1
-                continue
+                canBeLadderOnly = False
+                if not canBeChute:
+                    t['candcursor'] += 1
+                    continue
 
             #Insert event score as chute, ladder, and both
             for instType in (en.InstanceEventType.CHUTEONLY, en.InstanceEventType.LADDERONLY,
@@ -720,6 +726,7 @@ class EventSetBuilder:
                 match instType:
                     case en.InstanceEventType.CHUTEONLY:
                         if not canBeChute: continue
+                        if not canBeChuteOnly: continue
                         if (explicitEvent is None and not candEventSpecs['event'].isOrtho and
                             candEventSpecs['event'].crowLength < gp.mincrowvectordistcancel):
                             continue
@@ -732,6 +739,7 @@ class EventSetBuilder:
                                                                                readMode=True)[0]
                     case en.InstanceEventType.LADDERONLY:
                         if not canBeLadder: continue
+                        if not canBeLadderOnly: continue
                         if (explicitEvent is None and not candEventSpecs['event'].isOrtho and
                             candEventSpecs['event'].crowLength < gp.mincrowvectordistcancel):
                             continue
@@ -803,11 +811,6 @@ class EventSetBuilder:
                             curScore = balScoreMod * math.pow((1.0 + lengtheningControl), gp.gamelengthtightness)
 
 
-
-
-
-
-
                 # compBufDiv = abs(t['compensationbuffer'])
                 # if compBufDiv == 0: compBufDiv = 1
                 # if abs(t['compensationbuffer'] + effCompModulation) < abs(t['compensationbuffer']):
@@ -861,6 +864,7 @@ class EventSetBuilder:
                 numTwoHits = 0
                 numTwoHitsLoose = 0
                 twoHitNetLengths = []
+                twoHitInvalid = False
 
                 # def getTwoHitNetLength(p, chutesOrLadders, searchHoleNum, foundHoleType, eventLength):
                 #     for l in chutesOrLadders:
@@ -881,11 +885,18 @@ class EventSetBuilder:
                         if self.searchOrderedListForVal(chuteTops, candEventSpecs['event'].endHole.num + p) > -1:
                             if abs(p) == 4: numTwoHitsLoose += 1
                             else:
+                                if gp.onlysamedirtwohits:
+                                    twoHitInvalid = True
+                                    break
                                 numTwoHits += 1
                                 for c in chutes:
                                     if c['chutetop'] == candEventSpecs['event'].endHole.num + p:
+                                        if abs(candEventSpecs['event'].length - c['length']) < 3:
+                                            twoHitInvalid = True
+                                            break
                                         twoHitNetLengths.append(candEventSpecs['event'].length - c['length'])
                                         break
+                    if twoHitInvalid: continue
                     for p in (-1, -2 ,-4):
                         if self.searchOrderedListForVal(ladderTops, candEventSpecs['event'].startHole.num + p) > -1:
                             if abs(p) == 4: numTwoHitsLoose += 1
@@ -898,19 +909,33 @@ class EventSetBuilder:
                         if self.searchOrderedListForVal(chuteBases, candEventSpecs['event'].startHole.num + p) > -1:
                             if abs(p) == 4: numTwoHitsLoose += 1
                             else:
+                                if gp.onlysamedirtwohits:
+                                    twoHitInvalid = True
+                                    break
                                 numTwoHits += 1
                                 for c in chutes:
                                     if c['chutebase'] == candEventSpecs['event'].startHole.num + p:
+                                        if abs(candEventSpecs['event'].length - c['length']) < 3:
+                                            twoHitInvalid = True
+                                            break
                                         twoHitNetLengths.append(candEventSpecs['event'].length - c['length'])
                                         break
+                    if twoHitInvalid: continue
+
                 if instType in (en.InstanceEventType.CHUTEONLY, en.InstanceEventType.CHUTEANDLADDER):
                     for p in (1, 2, 4):
                         if self.searchOrderedListForVal(ladderBases, candEventSpecs['event'].startHole.num + p) > -1:
                             if abs(p) == 4: numTwoHitsLoose += 1
                             else:
+                                if gp.onlysamedirtwohits:
+                                    twoHitInvalid = True
+                                    break
                                 numTwoHits += 1
                                 for l in ladders:
                                     if l['ladderbase'] == candEventSpecs['event'].startHole.num + p:
+                                        if abs(l['length'] - candEventSpecs['event'].length) < 3:
+                                            twoHitInvalid = True
+                                            break
                                         twoHitNetLengths.append(l['length'] - candEventSpecs['event'].length)
                                         break
                         if self.searchOrderedListForVal(chuteTops, candEventSpecs['event'].startHole.num + p) > -1:
@@ -921,13 +946,21 @@ class EventSetBuilder:
                                     if c['chutetop'] == candEventSpecs['event'].startHole.num + p:
                                         twoHitNetLengths.append((-1)*c['length'] - candEventSpecs['event'].length)
                                         break
+                    if twoHitInvalid: continue
+
                     for p in (-1, -2, -4):
                         if self.searchOrderedListForVal(ladderTops, candEventSpecs['event'].endHole.num + p) > -1:
                             if abs(p) == 4: numTwoHitsLoose += 1
                             else:
+                                if gp.onlysamedirtwohits:
+                                    twoHitInvalid = True
+                                    break
                                 numTwoHits += 1
                                 for l in ladders:
                                     if l['laddertop'] == candEventSpecs['event'].endHole.num + p:
+                                        if abs(l['length'] - candEventSpecs['event'].length) < 3:
+                                            twoHitInvalid = True
+                                            break
                                         twoHitNetLengths.append(l['length'] - candEventSpecs['event'].length)
                                         break
                         if self.searchOrderedListForVal(chuteBases, candEventSpecs['event'].endHole.num + p) > -1:
@@ -938,6 +971,7 @@ class EventSetBuilder:
                                     if c['chutebase'] == candEventSpecs['event'].endHole.num + p:
                                         twoHitNetLengths.append((-1)*c['length'] - candEventSpecs['event'].length)
                                         break
+                    if twoHitInvalid: continue
 
                 if len(twoHitNetLengths) > 0 and (min(twoHitNetLengths) < (-1)*gp.maxtwohitnetgainloss or
                                                   max(twoHitNetLengths) > gp.maxtwohitnetgainloss):
@@ -1704,12 +1738,27 @@ class EventSetBuilder:
         for t in self.board.tracks:
             for e in t.eventSetBuild:
                 if e.instanceIsLadder: t.addLadder(bd.Ladder(e.startHole.num, e.endHole.num, t.num, e.crowVector, e))
-                t.addChute(bd.Chute(e.endHole.num, e.startHole.num, t.num, e.crowVector, e))
+                if e.instanceIsChute: t.addChute(bd.Chute(e.endHole.num, e.startHole.num, t.num, e.crowVector, e))
             t.setEventLadders([l.start for l in t.ladders])
             t.setEventChutes([c.start for c in t.chutes])
 
             #Set descriptive stats
             t.setEventImpedance()
+
+    def buildExplicitSetIntoEvents(self, explicitEventSet):
+        self.clearEventSet()
+        for es in explicitEventSet:
+            t = self.board.getTrackByNum(es[0].trackNum)
+            t.eventSetBuild = es
+            for e in es:
+                if e.instanceIsLadder: t.addLadder(bd.Ladder(e.startHole.num, e.endHole.num, t.num, e.crowVector, e))
+                if e.instanceIsChute: t.addChute(bd.Chute(e.endHole.num, e.startHole.num, t.num, e.crowVector, e))
+            t.setEventLadders([l.start for l in t.ladders])
+            t.setEventChutes([c.start for c in t.chutes])
+
+            #Set descriptive stats
+            t.setEventImpedance()
+
 
 
     def plot_coordinates_and_vectors(self, bitmap_name='output_bitmap.png'):
