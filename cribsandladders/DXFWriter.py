@@ -82,7 +82,7 @@ def rotate_vector_2d(direction_vector, angle_deg):
     new_direction_vector = np.dot(rotation_matrix, direction_vector)
     return new_direction_vector
 
-def compute_offset_curve(points, holesWithEvents, offset_distance, proximityThresh):
+def compute_offset_curve(points, holesWithEvents, progressMarkers, offset_distance, proximityThresh):
     # List to store points for the left and right offset curves
     left_curve, right_curve = [], []
     arrows = []
@@ -98,6 +98,7 @@ def compute_offset_curve(points, holesWithEvents, offset_distance, proximityThre
     triggerArrow = False
 
     # Loop through each pair of consecutive aug_points on the curve
+    progMarkerIdx = 0
     for i in range(len(aug_points) - 1):
         # Get two consecutive aug_points
         if i > 0:
@@ -123,10 +124,16 @@ def compute_offset_curve(points, holesWithEvents, offset_distance, proximityThre
         left_curve.append((aug_points[i] + perp_vector).tolist())
         right_curve.append((aug_points[i] - perp_vector).tolist())
 
-        if i > 1 and (i + 1)%7 == 0: triggerArrow = True
-        if triggerArrow and (i + 1)%5 != 0:
+        #Add progress marker in if in line
+        if i > 0 and i%5 == 0 and progMarkerIdx < len(progressMarkers):
+            left_curve.append((progressMarkers[progMarkerIdx][0]).tolist())
+            right_curve.append((progressMarkers[progMarkerIdx][1]).tolist())
+            progMarkerIdx += 1
+
+        if i > 1 and i%7 == 0: triggerArrow = True
+        if triggerArrow and i%5 != 0:
             #Check if event on next hole which would muddy up the arrow
-            if searchOrderedListForVal(holesWithEvents, i + 2) == -1:
+            if searchOrderedListForVal(holesWithEvents, i + 1) == -1:
                 # Det arrow directional vector
                 arrow_dir_vector = aug_points[i + 1] - aug_points[i]
                 arrow_dir_vector /= np.linalg.norm(arrow_dir_vector)
@@ -167,9 +174,8 @@ def compute_offset_curve(points, holesWithEvents, offset_distance, proximityThre
 
     return left_curve, right_curve, arrows
 
-def create_progress_marker_vectors(hole_list, right_curve_np, left_curve_np, length):
+def create_progress_marker_vectors(hole_list, length):
     vectors = []  # List to store the orthogonal vectors
-    right_curve_polyline, left_curve_polyline = LineString(right_curve_np), LineString(left_curve_np)
 
     # Loop through every 5th point (starting from index 4 for 0-based indexing)
     for i in range(4, len(hole_list), 5):
@@ -204,27 +210,8 @@ def create_progress_marker_vectors(hole_list, right_curve_np, left_curve_np, len
         else:
             mid_point = (p2 + p3)/2
 
-        #Search for intersection with splines in order to determine endpoints
-        extended_left = LineString([mid_point, mid_point + orthogonal_vector*2])
-        extended_right = LineString([mid_point, mid_point - orthogonal_vector*2])
-
-        intersects = [extended_left.intersection(left_curve_polyline),
-                      extended_right.intersection(right_curve_polyline)]
-
+        # Store the vector as a tuple of (left_point, right_point)
         linepoints = [mid_point + orthogonal_vector, mid_point - orthogonal_vector]
-
-        # Compute the start and end points of the orthogonal vector
-        for i in range(len(intersects)):
-            if not intersects[i].is_empty:
-                curClosest, curClosestDist = np.array[-1, -1], 99999
-                for point in intersects[i]:
-                    curDist = euclidean_distance(point, mid_point)
-                    if curDist < curClosestDist:
-                        curClosest = point
-                        curClosestDist = curDist
-                linepoints[i] = curClosest
-
-        # Store the vector as a tuple of (start_point, end_point)
         vectors.append(tuple(linepoints))
 
     return vectors
@@ -250,30 +237,32 @@ def buildDXFFile(board):
             msp.add_circle(h, holeRadius, dxfattribs={'layer': "Holes_T"+str(t.Track_ID)})
 
         # Determine holes containing events
-        holesWithEvents = [e.startHole for e in t.eventSetBuild] + [e.endHole for e in t.eventSetBuild]
+        holesWithEvents = [e.startHole.num for e in t.eventSetBuild] + [e.endHole.num for e in t.eventSetBuild]
         holesWithEvents.sort()
+
+        # Every 5th hole draw marker line across
+        doc.layers.add(name="NumMarks_T" + str(t.Track_ID), color=rd.randint(1, 30), linetype="DOTTED")
+        slashVectors = create_progress_marker_vectors(np.array(holes_in),0.24) #NOTE this should be 2x offset dist of spline
+        for s in slashVectors:
+            msp.add_lwpolyline(s, dxfattribs={'layer': "NumMarks_T"+str(t.Track_ID)})
 
         #Build in spline following along either side of each track
         right_curve, left_curve, arrows =\
-            compute_offset_curve(np.array(holes_in), holesWithEvents, 0.12, 0.115)
+            compute_offset_curve(np.array(holes_in), holesWithEvents, slashVectors,
+                                 0.12, 0.115)
         doc.layers.add(name="TrackPath_T"+str(t.Track_ID), color=rd.randint(1,30), linetype="DOTTED")
-        msp.add_spline(right_curve, dxfattribs={'layer': "TrackPath_T"+str(t.Track_ID)})
-        msp.add_spline(left_curve, dxfattribs={'layer': "TrackPath_T"+str(t.Track_ID)})
+        right_spline = msp.add_spline(right_curve, dxfattribs={'layer': "TrackPath_T"+str(t.Track_ID)})
+        left_spline = msp.add_spline(left_curve, dxfattribs={'layer': "TrackPath_T"+str(t.Track_ID)})
 
         #Build marker arrows in with spline
         for arrow in arrows:
             msp.add_lwpolyline(arrow, dxfattribs={'layer': "TrackPath_T"+str(t.Track_ID)})
 
-        #Extract spline points for intersection with marker lines
-        num_points_extract = len(t.trackholes)*10
-        right_curve_np = np.array([right_curve.point(i / num_points_extract) for i in range(num_points_extract + 1)])
-        left_curve_np = np.array([left_curve.point(i / num_points_extract) for i in range(num_points_extract + 1)])
-
-        # Every 5th hole draw marker line across
-        doc.layers.add(name="NumMarks_T" + str(t.Track_ID), color=rd.randint(1, 30), linetype="DOTTED")
-        slashVectors = create_progress_marker_vectors(np.array(holes_in), right_curve_np, left_curve_np, 0.24) #NOTE this should be 2x offset dist of spline
-        for s in slashVectors:
-            msp.add_lwpolyline(s, dxfattribs={'layer': "NumMarks_T"+str(t.Track_ID)})
+        # #Extract spline points for intersection with marker lines
+        # num_points_extract = len(t.trackholes)*10
+        # right_curve_np = np.array([right_spline.fit_points(i / num_points_extract) for i in range(num_points_extract + 1)])
+        # left_curve_np = np.array([left_spline.point(i / num_points_extract) for i in range(num_points_extract + 1)])
+        right_curve_np, left_curve_np = np.array(right_curve), np.array(left_curve)
 
         #Add starter holes + circumference
         msp.add_circle([0, t.num*0.2], holeRadius, dxfattribs={'layer': "Holes_T"+str(t.Track_ID)})
