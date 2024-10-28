@@ -97,6 +97,7 @@ class PossibleEvents:
                                       orthoFwdMinIncr=event_sr['orthoFwdMinIncr'], orthoRevMinIncr=event_sr['orthoRevMinIncr'],
                                       orthoFwdMaxIncr=event_sr['orthoFwdMaxIncr'], orthoRevMaxIncr=event_sr['orthoRevMaxIncr'])
             curEvent.db_hash = event_sr["CandidateEvent_ID"]
+            curEvent.eventID  = event_sr["CandidateEvent_ID"]
             curEvent.linkFinderHash = event_sr['FinderHash']
             curEvent.instanceIncr = event_sr['instanceIncr']
             curEvent.instanceRev = event_sr['instanceRev']
@@ -1080,6 +1081,7 @@ class CandidateEvent:
                  orthoVector = (-1,-1),
                  sharedWithTracks = None, linkedEvents = None):
         self.db_hash = -1
+        self.eventID = -1
         self.linkFinderHash = -1
         self.trackNum = trackNum
         self.startHole = startHole

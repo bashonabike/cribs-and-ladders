@@ -6,6 +6,27 @@ import os
 import matplotlib.pyplot as plt
 import bisect as bsc
 from shapely.geometry import LineString
+import sqlite3 as sql
+
+def insert_dxf_record(board, optimizerRunSet, optimizerRun):
+    sqlConn = sql.connect("etc/Optimizer.db")
+    sqliteCursor = sqlConn.cursor()
+    sqliteCursor.execute("INSERT INTO DXFOutLog (OptimizerRunSet,OptimizerRun,Board_ID,Timestamp) VALUES (?,?,?,?)",
+                         [optimizerRunSet, optimizerRun, board.boardID,
+                          datetime.now().strftime('%m/%d/%y %H:%M:%S')])
+    sqlConn.commit()
+    DXF_ID = sqlConn.execute("SELECT MAX(DXF_ID) FROM DXFOutLog WHERE Board_ID = ?", [board.boardID]).fetchone()[0]
+
+    sqliteCursor.execute("BEGIN TRANSACTION")
+    for t in board.tracks:
+        for e in t.eventSetBuild:
+            sqliteCursor.execute("INSERT INTO DXFOutEvents(DXF_ID,Board_ID,Track_ID,CandidateEvent_ID,instanceIsChute," +
+                                 "instanceIsLadder,instanceIncr,instanceRev) VALUES (?,?,?,?,?,?,?,?)",
+                                 [DXF_ID, board.boardID, t.Track_ID, e.eventID, e.instanceIsChute,
+                                  e.instanceIsLadder,e.instanceIncr,e.instanceRev])
+    sqliteCursor.execute("END TRANSACTION")
+    sqlConn.commit()
+
 
 def convert_mm_to_in(coordinate_list):
     """

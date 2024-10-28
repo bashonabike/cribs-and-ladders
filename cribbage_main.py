@@ -261,6 +261,7 @@ class Routines:
 
         sqlOptimizerCon.close()
         dxf.buildDXFFile(self.board)
+        dxf.insert_dxf_record(self.board, self.optimizerRunSet, self.optimizerRun)
         return self.optimizer.bestPostIterParams
 
 
