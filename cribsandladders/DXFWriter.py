@@ -343,9 +343,9 @@ def buildDXFFile(board):
                 curLayer = "NormEvents_T" + str(t.Track_ID)
             elif e.instanceIsLadder:
                 curLayer = "RampUpEvents_T" + str(t.Track_ID)
+                curVect.reverse() #Reverse so ramps from end to start
             elif e.instanceIsChute:
                 curLayer = "RampDownEvents_T" + str(t.Track_ID)
-                curVect.reverse() #Reverse so ramps from end to start
 
             msp.add_lwpolyline(curVect, dxfattribs={'layer': curLayer})
 
