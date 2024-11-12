@@ -27,7 +27,7 @@ numtrials = 1000
 nummaxthreads = 2
 #OPTIONAL run multiple boards in a batch
 batchnum = 1
-boardname = "Micro Board 4"
+boardname = "Micro Board 7"
 
 #Set if seeking optimal events layout
 findmode = True
@@ -49,15 +49,15 @@ maxeventlineext = 100
 mincrowvectordistcancel = 12 #mm, since straight line approx this equates to ~15mm curvy, need room to discernibly add lump on 1 side
 whenstartworryingaboutcancels = 12 #After this many cancels on a track, start impeding
 probminimodeliters = 500
-allowabletwohits = 4
-onlysamedirtwohits = True
+allowabletwohits = 3
+onlysamedirtwohits = False
 maxtwohitnetgainloss = 25
 randomfeatheringamount = 9 #Nix holes randomly at nth interval to avoid endless opt loops
 maxefflengthdisp = 24
 goodscorecutoffperc = 0.5 #percent, keep well below 1.0
 gamelengthtightness = 5  #This is exponent mantissa, probably best keep below 6, should be int for perf
 idealcancelspct = 0.75
-finishlinelength = 20 #Number of holes that can be left free from events at end
+finishlinelength = 15 #Number of holes that can be left free from events at end
 # (ideally stick these bits in parallel on board so all trax side by side)
 
 #OPTIMIZER BOUNDING PARAMS
@@ -95,8 +95,8 @@ optmultispct = 0.05
 ##################################################################################################
 #Iterative optimizer params
 changebaseincrperiter = 0.01
-iterscorecutoff = 4
-prescorecutoff = 4
+iterscorecutoff = 2
+prescorecutoff =  2.5
 maxnumitermodeliters = 1000
 
 

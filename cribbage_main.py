@@ -279,7 +279,7 @@ if __name__ == "__main__":
     # checkBoardBestTrial(1, 807)
     # genTrainSet()
 
-    routines = Routines(optimizerRunSet=11)
+    routines = Routines(optimizerRunSet=18)
     # routines.runNormalCribGame(debug=False)
     routines.setUpBoard(homoRisk = False)
     bestIterParams = routines.runIter(debug=False)
