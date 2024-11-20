@@ -337,8 +337,8 @@ def buildDXFFile(board):
     arrow_dir_vector = (arrow_head - arrow_base) / np.linalg.norm((arrow_head - arrow_base))
 
     # Build arrow unit vectors
-    left_arrow_vect = rotate_vector_2d((-1) * arrow_dir_vector, -30) * 0.05
-    right_arrow_vect = rotate_vector_2d((-1) * arrow_dir_vector, 30) * 0.05
+    left_arrow_vect = rotate_vector_2d((-1) * arrow_dir_vector, -30) * 0.08
+    right_arrow_vect = rotate_vector_2d((-1) * arrow_dir_vector, 30) * 0.08
 
     # Build vectors and print lines into layer
     msp.add_lwpolyline([arrow_base.tolist(), arrow_head.tolist()], dxfattribs={'layer': "TrackPath_ALL"})
