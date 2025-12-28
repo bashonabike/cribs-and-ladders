@@ -1,16 +1,6 @@
-import random
-import heapq
-import math
-
-from cribsandladders.CribbageGame import can_peg
-from cribsandladders.Deck import card_to_string, peg_val
-from cribsandladders.ScoreHand import expected_hand_value, crib_cards_value
-from cribsandladders.Deck import Deck, card_to_string, peg_val, Card
+from cribsandladders.ScoreHand import expected_hand_value
 from copy import deepcopy
-import cribsandladders.ScoreHand as scorer
 import game_params as gp
-from itertools import combinations
-import time as tm
 import scoretree as stcpp
 
 

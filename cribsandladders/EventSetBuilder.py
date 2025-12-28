@@ -846,48 +846,6 @@ class EventSetBuilder:
         start_time = time.time()
         if explicitEvent is None and hole.num < t['optfirstchute']: return []
 
-        initCompModifier = 0.0
-        # twohitimpeders, twohitboosts = [], []
-        # twohitimpedanceeffector = (params.tryGetParam(t['track_id'], "twohitfreqimpedance")
-        #                            *(t['twohitsthusfar']/t['optevents']))
-        #
-        # twohitimpeders.append(dict(scalardisp=1, isallowed=(
-        #         (1.0 - (hole.num / len(t['track'].trackholes))) * t['compensationbuffer']
-        #         / len(t['track'].trackholes)
-        #         > params.tryGetParam(t['track_id'],'move1allowanceratio')), mod=(-1)*gp.likelihoodofonemove
-        #                                                                         *gp.ideallikelihoodholehit))
-        # twohitimpeders.append(dict(scalardisp=2, isallowed=t['compensationbuffer'] > 0, mod=(-1)*gp.likelihoodoftwomove
-        #                                                                         *gp.ideallikelihoodholehit))
-        # twohitimpeders.append(dict(scalardisp=4, isallowed=t['compensationbuffer'] > 0, mod=(-1)*gp.likelihoodoffourmove
-        #                                                                         *gp.ideallikelihoodholehit))
-        #
-        # twohitboosts.append(dict(scalardisp=1, isallowed=(
-        #         (1.0 - (hole.num / len(t['track'].trackholes))) * t['compensationbuffer']
-        #         / len(t['track'].trackholes)
-        #         < (-1)*params.tryGetParam(t['track_id'],'move1allowanceratio')), mod=gp.likelihoodofonemove
-        #                                                                         *gp.ideallikelihoodholehit))
-        # twohitboosts.append(dict(scalardisp=2, isallowed=t['compensationbuffer'] < 0, mod=gp.likelihoodoftwomove
-        #                                                                         *gp.ideallikelihoodholehit))
-        # twohitboosts.append(dict(scalardisp=4, isallowed=t['compensationbuffer'] < 0, mod=gp.likelihoodoffourmove
-        #                                                                         *gp.ideallikelihoodholehit))
-
-        # # NOTE that we cannot fall before a laadder, since we are building forward from top of event
-        # match spaceSinceLastChute:
-        #     case 1:
-        #         bypassRules = bypassonehit
-        #         if bypassRules: initCompModifier = (-1) * gp.likelihoodofonemove
-        #     case 2:
-        #         bypassRules = bypasstwohit
-        #         if bypassRules: initCompModifier = (-1) * gp.likelihoodoftwomove
-        #     case 4:
-        #         bypassRules = bypassfourhit
-        #         if bypassRules: initCompModifier = (-1) * gp.likelihoodoffourmove
-        #
-        # if not prevIsLadder and spaceSinceLastChute < gp.mindistancechuteonly: return []
-        # if prevIsLadder and not bypassRules and spaceSinceLastChute < gp.mindistanceafterladder: return []
-        # if (spaceSinceLastChute < gp.mindistanceeveneventspacing and prevIsLadder and not bypassRules
-        #         and spaceSinceLastChute % 2 == 0): return []
-
         # Passed gauntlet!  Let's try to find an event to deplete this energy
         eventFitnesses = []
         explicitEventCounter = 0
@@ -955,38 +913,7 @@ class EventSetBuilder:
                 t['candcursor'] += 1
                 continue
 
-            # Check for two-hits
-
-            # boostsIfChute, impedersIfChute, boostsIfLadder, impedersIfLadder = [],[],[],[]
-            # curEventLength = candEventSpecs['length']
-            #
-            # #NOTE: All events can be chutes, hence no need to check annything
-            # boostsIfChute.extend(self.getEffectorsForDisps(candEventSpecs['eventbase'], (1,2,4),
-            #                                            twohitboosts, ladderBases, events=ladders))
-            # impedersIfChute.extend(self.getEffectorsForDisps(candEventSpecs['eventbase'], (1,2,4),
-            #                                            twohitboosts, chuteTops, events=chutes))
-            # impedersIfChute.extend(self.getEffectorsForDisps(candEventSpecs['eventtop'], (-1,-2,-4),
-            #                                            twohitimpeders, chuteBases, selfScaleLength=curEventLength))
-            # impedersIfChute.extend(self.getEffectorsForDisps(candEventSpecs['eventtop'], (-1,-2,-4),
-            #                                            twohitimpeders, ladderTops, selfScaleLength=curEventLength))
-            # if candEventSpecs['canbeladder'] or explicitLadder:
-            #     boostsIfLadder.extend(self.getEffectorsForDisps(candEventSpecs['eventtop'], (1,2,4),
-            #                                                twohitboosts, ladderBases, events=ladders))
-            #     impedersIfLadder.extend(self.getEffectorsForDisps(candEventSpecs['eventtop'], (1,2,4),
-            #                                                twohitimpeders, chuteTops, events=chutes))
-            #     boostsIfLadder.extend(self.getEffectorsForDisps(candEventSpecs['eventbase'], (-1,-2,-4),
-            #                                                twohitboosts, ladderTops, selfScaleLength=curEventLength))
-            #     boostsIfLadder.extend(self.getEffectorsForDisps(candEventSpecs['eventbase'], (-1,-2,-4),
-            #                                                twohitboosts, chuteBases, selfScaleLength=curEventLength))
-
-            # allModsIfChute = boostsIfChute + impedersIfChute
-            # allModsIfLadder = boostsIfLadder + impedersIfLadder
-
             if explicitEvent is None:
-                # canBeChute = len(allModsIfChute) == 0 or next((eff for eff in allModsIfChute if not eff['effect']), None) is None
-                # canBeLadder = (candEventSpecs['canbeladder'] and
-                #                (len(allModsIfLadder) == 0
-                #                or (next((eff for eff in allModsIfLadder if not eff['effect']), None) is None)))
                 canBeChute = True
                 canBeLadder = candEventSpecs['canbeladder']
             else:
@@ -1067,11 +994,6 @@ class EventSetBuilder:
                 effCompModulation = effLengthForecast - t['curestefflength']
                 # print(str(effCompModulation))
 
-                # effEnergyModulation = 0
-                # if len(modsForType) > 0:
-                #     #Any two-hits increase nrg, no matter up or down
-                #     effEnergyModulation += sum([m['scaledenergymod'] for m in modsForType])
-
                 # BASE SCORE ON BLEND MOD + ENERGY
 
                 # NOTE: longer balanceandefflengthcontrolfactor for longer route
@@ -1108,16 +1030,6 @@ class EventSetBuilder:
                             # curScore = balScoreMod*gp.gamelengthtightness
                             curScore = balScoreMod * math.pow((1.0 + lengtheningControl), gp.gamelengthtightness)
 
-                # compBufDiv = abs(t['compensationbuffer'])
-                # if compBufDiv == 0: compBufDiv = 1
-                # if abs(t['compensationbuffer'] + effCompModulation) < abs(t['compensationbuffer']):
-                #     curScore = 10*(1.0 - abs(effCompModulation)/compBufDiv)
-                # elif abs(t['compensationbuffer'] + effCompModulation) > abs(t['compensationbuffer']):
-                #     curScore = 10*(1.0 + 10*abs(effCompModulation)/compBufDiv)
-                # else:
-                #     curScore = 10
-                # if curScore < 0:
-                #     sdfsd=""
                 if abs(effEnergy) + abs(t['energybuffer']) > 0:
                     curScore *= (1.0 + (params.tryGetParam(t['track_id'], 'energybufferenforcement')
                                         * abs(effEnergy - t['energybuffer']) / (
@@ -1290,29 +1202,6 @@ class EventSetBuilder:
                 curScore *= (1.0 + (numTwoHits + numTwoHitsLoose / 2) * t['twohitsthusfar'] *
                              params.tryGetParam(t['track_id'], 'twohitfreqimpedance'))
 
-                # Adjust score based on direction of effCompModulation (trying to get to 0)
-                # Again, boosters are (+) and vice versa, so we attempt negation
-                tempp = False
-                # if effCompModulation != 0:
-                #     # print("Score b4 comp, hist & cancel mods: {}".format(curScore))
-                #     tempp = True
-                #     #balanceandefflengthcontrolfactor shifts based on whether game needs more lengthening or shortening
-                #     if t['compensationbuffer'] < 0:
-                #         effControlFactor = (1.0 - params.tryGetParam(t['track_id'], 'balanceandefflengthcontrolfactor'))
-                #     else:
-                #         effControlFactor = params.tryGetParam(t['track_id'], 'balanceandefflengthcontrolfactor')
-                #
-                #     if abs(t['compensationbuffer'] + effCompModulation) < abs(t['compensationbuffer']):
-                #         #Good, reward heavily!
-                #         curScore *= effControlFactor
-                #     else:
-                #         #Punish
-                #         curScore /= effControlFactor
-
-                # #Boost score for each allowable 2-hit, factoring in two-hit impedance
-                # for m in modsForType:
-                #     curScore = math.sqrt(curScore)*(1.0 + twohitimpedanceeffector)
-
                 # Impede score if too many ladders/chutes are getting cancelled
                 if instType != en.InstanceEventType.CHUTEANDLADDER and t['cancels'] >= gp.whenstartworryingaboutcancels:
                     if t['cancels'] >= 2.5 * gp.whenstartworryingaboutcancels: continue
@@ -1376,16 +1265,6 @@ class EventSetBuilder:
                     t['numnogos'] += 1
                     continue
 
-                # if sum([h[1] for h in self.allTentLengthHisto]) > 0:
-                #     curLenPerc = (self.allTentLengthHisto[candEventSpecs['length'] - 1][1] /
-                #                   sum([h[1] for h in self.allTentLengthHisto]))
-                #     avgPerc = (1.0 / len([h for h in self.allTentLengthHisto if h[1] > 0]))
-                #     curScore *= (1.0 + (curLenPerc-avgPerc)*params.tryGetParam(t['track_id'],'lengthhistogramscoringfactor)
-
-                # Add event score to output list
-                # if tempp: print("Score after hist & cancel mods: {}".format(curScore))
-                # print("{} {}".format(instType, curScore))
-                # print(curScore)
                 eventFitnesses.append(dict(event=candEventSpecs['event'],
                                            eventspecs=candEventSpecs,
                                            score=curScore, effnetenergy=effNetEnergy,
@@ -1707,18 +1586,18 @@ class EventSetBuilder:
     def tryEventSet(self, params, prevEffLengths):
         """
         Attempts to generate a complete set of events for all tracks based on the given parameters.
-        
+
         This is the main method that coordinates the event generation process across all tracks.
         It handles the core logic of placing events while respecting constraints and maintaining
         game balance.
-        
+
         Args:
             params: Parameter set containing configuration values for event generation.
             prevEffLengths: List of effective lengths from previous generation attempts.
-            
+
         Returns:
             bool: True if a valid event set was generated, False otherwise.
-            
+
         Note:
             This method modifies the board state in-place by adding events to tracks.
             If generation fails, it may adjust parameters and retry automatically.
@@ -2071,55 +1950,6 @@ class EventSetBuilder:
 
             return False
 
-        # Try to bring all sets down to lowest one! since cannot really decrease eff length at this point
-        # Given set of ladders, assume liklihood of landing on that square is 1/trackholes
-        # therefore try to find a ladder closest to the rem buffer to cancel
-        # effShortestTrackBuff = min([t['compensationbuffer'] for t in trackEventsOverview])
-        # for t in trackEventsOverview:
-        # trackLadders = [l for l in t['eventsetbuild'] if l.instanceIsLadder]
-        # trackLadders.sort(key = lambda l: l.length)
-        # trackLadderLengths = [l.length for l in trackLadders]
-        #
-        # effIncrease = int(t['compensationbuffer'] - effShortestTrackBuff)
-        # if effIncrease == 0:
-        #     t['trackfilled'] = True
-        #     continue
-        #
-        # idx = self.searchOrderedListForVal(trackLadderLengths, effIncrease)
-        # if idx > -1:
-        #     #Success! cancel this ladder and move on
-        #     trackLadders[idx].instanceIsLadder = False
-        #     t['trackfilled'] = True
-        # else:
-        #     effIncr1 = math.floor(effIncrease/2)
-        #     effIncr2 = math.floor(effIncrease/2) + effIncrease % 2
-        #     while effIncr1 > 0:
-        #         idx1 = self.searchOrderedListForVal(trackLadderLengths, effIncr1)
-        #         if idx1 > -1:
-        #             if effIncr1 == effIncr2:
-        #                 #Look left
-        #                 if idx1 > 0 and trackLadderLengths[idx-1] == effIncr2:
-        #                     trackLadders[idx1].instanceIsLadder = False
-        #                     trackLadders[idx1-1].instanceIsLadder = False
-        #                     t['trackfilled'] = True
-        #                     break
-        #                 #Look right
-        #                 elif idx1 < len(trackLadderLengths) - 1 and trackLadderLengths[idx+1] == effIncr2:
-        #                     trackLadders[idx1].instanceIsLadder = False
-        #                     trackLadders[idx1+1].instanceIsLadder = False
-        #                     t['trackfilled'] = True
-        #                     break
-        #             else:
-        #                 idx2 = self.searchOrderedListForVal(trackLadderLengths, effIncr2)
-        #                 if idx2 > -1:
-        #                     trackLadders[idx1].instanceIsLadder = False
-        #                     trackLadders[idx2].instanceIsLadder = False
-        #                     t['trackfilled'] = True
-        #                     break
-        #         effIncr1 -= 1
-        #         effIncr2 += 1
-
-        # return len([t for t in trackEventsOverview if not t['trackfilled']]) == 0
         end_time = time.time()
         self.totalTime += end_time - start_time
         totMarkov = self.miniMarkovTime / self.totalTime

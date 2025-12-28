@@ -33,7 +33,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import math
 import game_params as gp
-import cribsandladders.BaseLayout as bs
 import copy as cp
 import sqlite3 as sql
 import pandas as pd
@@ -211,30 +210,7 @@ class PossibleEvents:
                 h_a = holes[h_a_idx]
                 for h_b_idx in range(h_a_idx + 1, len(holes) - 1):
                     h_b = holes[h_b_idx]
-                    # if h_a.num == 5 and h_b.num == 30 and t.trackNum == 1:
-                    #     p1 = np.array(h_a.coords)
-                    #     p2 = np.array(holes[h_a_idx + 1].coords)
-                    #     p3 = np.array(h_b.coords)
-                    #
-                    #     # Create vectors
-                    #     v1 = p2 - p1
-                    #     v2 = p3 - p1
-                    #
-                    #     # Normalize the vectors
-                    #     unit_v1 = v1 / np.linalg.norm(v1)
-                    #     unit_v2 = v2 / np.linalg.norm(v2)
-                    #
-                    #     # Calculate the dot product and magnitudes
-                    #     dot_product = np.dot(unit_v1, unit_v2)
-                    #     if dot_product > 1.0:
-                    #         # Rounding error??? this means vectors are parallel, 0 deg
-                    #         angle_rad = 0
-                    #     elif dot_product < -1.0:
-                    #         angle_rad = math.pi
-                    #     else:
-                    #         # Calculate the angle in radians between the two vectors
-                    #         angle_rad = np.arccos(dot_product)
-                    #     angle_deg = np.degrees(angle_rad)
+
                     # Determine if route is possible directly
                     if not self.checkAngleForOrtho(self.eventAngleWithInstantSlope(h_a.coords,
                                                                                    holes[h_a_idx + 1].coords,
@@ -960,10 +936,6 @@ class PossibleEvents:
         orthogonal_dx, orthogonal_dy = self.orthogonal_vector(point1, point2, length + gp.eventminspacing, reverse)
         ortho_dxdy = (orthogonal_dx, orthogonal_dy)
 
-        # The orthogonal vector endpoints
-        # ortho_point1 = (mid[0] + orthogonal_dx / 2, mid[1] + orthogonal_dy / 2)
-        # ortho_point2 = (mid[0] - orthogonal_dx / 2, mid[1] - orthogonal_dy / 2)
-
         # Extend out p1 & p2 to widen search box
         (ext1, ext2) = self.extend_line(point1, point2, gp.eventminspacing / 2)
         extp1, extp2 = ext1[1], ext2[1]
@@ -973,12 +945,6 @@ class PossibleEvents:
         orthorecpoint2 = self.orthoBoundingBox(ortho_vec2)
         orthoboundpoints = list(orthorecpoint1)
         orthoboundpoints.extend(list(orthorecpoint2))
-
-        # # Determine the min and max x and y values to form the smallest rectangle
-        # min_x = min(point1[0], point2[0], ortho_point1[0], ortho_point2[0])
-        # min_y = min(point1[1], point2[1], ortho_point1[1], ortho_point2[1])
-        # max_x = max(point1[0], point2[0], ortho_point1[0], ortho_point2[0])
-        # max_y = max(point1[1], point2[1], ortho_point1[1], ortho_point2[1])
 
         # return self.determine_rectangle_corners((min_x, min_y), (max_x, max_y))
         return self.cartesian_bounding_box(tuple(orthoboundpoints))

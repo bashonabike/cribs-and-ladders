@@ -1,8 +1,6 @@
 import heapq
-import math
 from itertools import combinations
 import cribsandladders.Deck as dk
-from copy import deepcopy
 import game_params as gp
 
 
@@ -268,9 +266,6 @@ def expected_hand_value(pothand, potdiscard, rankLookupTable, risk, hascrib):
       :return: expected point value for the 4 card hand
       """
 
-    # card_counts=card_counts_list(pothand, potdiscard)
-    # base_expected_value,aug_expected_value = 0.0, 0.0
-
     # Order tuples by rank, then suit
     pothandsorted = sorted(pothand, key=lambda c: (c.rank, c.suit))
     if not isinstance(potdiscard, dk.Card):
@@ -289,38 +284,6 @@ def expected_hand_value(pothand, potdiscard, rankLookupTable, risk, hascrib):
     # Retrieve modulation from dataframe
     aug_expected_value = rankLookupTable.loc[(handhash, discardhash, 1 if hascrib else 0), "ValR{}".format(risk)]
     aug_expected_value += flush_adder(pothandsorted, potdiscardsorted, risk)
-
-    handcounter, discardcounter = 0, 0
-    drawpicks = 0
-
-    #
-    #
-    # for suit in range (1,5):
-    #     for rank in range (1,14):
-    #         drawpicks = gp.numdecks
-    #         if (handcounter < gp.handsize and (pothandsorted[handcounter].rank, pothandsorted[handcounter].suit) ==
-    #                 (rank, suit)):
-    #             handcounter += 1
-    #             drawpicks -= 1
-    #         if (discardcounter < gp.discardsize and drawpicks > 0 and
-    #                 (potdiscardsorted[discardcounter].rank, potdiscardsorted[discardcounter].suit) ==
-    #                 (rank, suit)):
-    #             discardcounter += 1
-    #             drawpicks -= 1
-    #
-    #         if drawpicks > 0:
-    #             hand_value=score_hand(pothand, dk.Card(rank, suit), False)
-    #             #gets the score of the hand for each possible cut card
-    #             #incorporating risk
-    #             if risk < 0.0:
-    #                 aug_hand_value=math.sqrt(hand_value)
-    #             else:
-    #                 aug_hand_value=hand_value*hand_value
-    #
-    #             probability = float(drawpicks)/float(gp.unknowncardsafterdeal)               #calculates the probability of drawing that cut card
-    #             base_expected_value += (hand_value*probability)
-    #             #multiplies the calculated score by the probability of drawing that cut card, adds to total expected value
-    #             aug_expected_value += (aug_hand_value*probability)
 
     return aug_expected_value
 

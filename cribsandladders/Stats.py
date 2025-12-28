@@ -1,7 +1,4 @@
 import game_params as gp
-import bisect
-import cribsandladders.Board as bd
-import cribsandladders.CribSquad as sq
 import statistics as st
 import collections as col
 import matplotlib.pyplot as plt
@@ -9,13 +6,10 @@ import seaborn as sns
 import datetime
 import pandas as pd
 import Enums as en
-import inspect as it
-import functools as fu
 import sqlite3 as sql
 import datetime as dt
 from io import StringIO
 import os
-from collections import defaultdict
 
 
 class Stats:
@@ -96,44 +90,6 @@ class Stats:
         self.hist_df = None
         self.hist_by_track_df = None
 
-    # slice & dice data at end of trials, group by trial to compute stuff pointwise per trial
-    # def addMoveStat(self, trial, track, moveNum, round, playerNum, oldScore, baseScore, reason, event, newScore, soexcite):
-    #     eventAmt = newScore- oldScore - baseScore
-    #     curMove = Move()
-    #     curMove.trial = trial
-    #     curMove.movenum = moveNum
-    #     curMove.player = playerNum
-    #     curMove.track = track.num
-    #     curMove.soexcite = soexcite
-    #     curMove.round = round
-    #     curMove.hasEvent = event != en.Event.NONE
-    #
-    #     if event != en.Event.NONE:
-    #         if eventAmt == 0:
-    #             wtf='wtf'
-    #         if event == en.Event.CHUTE:
-    #             curMove.chuteamt = eventAmt
-    #             curMove.chutehit = (oldScore + baseScore, newScore)
-    #             curMove.eventhit = curMove.chutehit
-    #         elif event == en.Event.LADDER:
-    #             curMove.ladderamt = eventAmt
-    #             curMove.ladderhit = (oldScore + baseScore, newScore)
-    #             curMove.eventhit = curMove.ladderhit
-    #
-    #         curMove.ladderorchuteamt = eventAmt
-    #
-    #     curMove.score = newScore - oldScore
-    #     if   curMove.score == 0:
-    #             wtf='wtf'
-    #
-    #     curMove.basescore = baseScore
-    #     curMove.reason = reason
-    #     curMove.currpos = newScore
-    #     curMove.posin1 = curMove.currpos + 1
-    #     curMove.posin2 = curMove.currpos + 2
-    #
-    #     self.moves.append(curMove)
-
     def clearStatsAndSetMoves(self, curMoveSet):
         """
         Resets all statistics and sets the current set of moves.
@@ -190,29 +146,6 @@ class Stats:
             None
         """
         moves_df = pd.DataFrame.from_records([m.to_dict() for m in self.moves])
-        # print("Liklihood given hole hit: " + str(len(self.moves)/(gp.numplayers*gp.effectiveboardlength*gp.numtrials)))
-        # max_rounds_per_trial = defaultdict(int)
-        #
-        # for event in self.moves:
-        #     max_rounds_per_trial[event.trial] = max(max_rounds_per_trial[event.trial], event.round)
-        #
-        # # Step 2: Calculate the average of the max rounds
-        # max_rounds = max_rounds_per_trial.values()
-        # average_max_round = sum(max_rounds) / len(max_rounds)
-        # print("Avg rounds/game: {}".format(average_max_round))
-        #
-        # totPegMoves = len([m for m in self.moves if m.pegMove])
-        # avgMovesPerPegging = totPegMoves/(gp.numtrials*gp.numplayers*average_max_round)
-        # print("Avg moves per pegging: {}".format(avgMovesPerPegging))
-        #
-        # totHand = len([m for m in self.moves if not m.pegMove])
-        # for i in range(1, 20):
-        #     tempp = [m.to_dict() for m in self.moves if m.score == i and not m.pegMove]
-        #     print("Hand {} - {}".format(i, len(tempp)/(totHand)))
-        # totPeg = len([m for m in self.moves if m.pegMove])
-        # for i in range(1, 20):
-        #     tempp = [m.to_dict() for m in self.moves if m.score == i and m.pegMove]
-        #     print("Peg {} - {}".format(i, len(tempp)/(totPeg)))
         ladders_df = pd.concat([t.getLaddersAsDF() for t in self.board.tracks])
         chutes_df = pd.concat([t.getChutesAsDF() for t in self.board.tracks])
         events_df = pd.concat([t.getEventsAsDF() for t in self.board.tracks])
@@ -231,7 +164,7 @@ class Stats:
         else:
             events_df.rename(columns={"start": "start_e", "end": "end_e"}, inplace=True)
 
-        # TODO: figure out how inde3xintg works???
+        # TODO: get indexing working in pandas
         # moves_df.set_index(['track', 'currpos'], inplace=True, drop=False)
         # moves_df.index.name = 'idx_track_currpos'
         # moves_df.set_index(['trial', 'track', 'player', 'movenum'], inplace=True, drop=False)

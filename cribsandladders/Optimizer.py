@@ -6,12 +6,7 @@ import lightgbm as lgb
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.model_selection import train_test_split
 import random as rd
-import os
-import datetime as dt
 from sklearn.metrics import mean_squared_error
-import mystic
-from mystic.solvers import fmin
-from mystic.monitors import VerboseMonitor
 
 import game_params as gp
 
@@ -78,9 +73,6 @@ class Optimizer:
         boardID = self.board.boardID
         query = "SELECT Param, MIN(Track_ID) AS Elig_Track_ID FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID >= ? AND Active = ? GROUP BY Param"
         trackparamranges_df = pd.read_sql_query(query, self.sqlConn, params=[self.board.boardID, 0, 1])
-        # self.sqliteCursor.execute(query, [self.board.boardID, 0])
-        # trackparamranges_df = pd.DataFrame(self.sqliteCursor.fetchall(),
-        #                                               columns=[d[0] for d in self.sqliteCursor.description])
         trackparamranges_df.sort_values(['Param'], inplace=True)
 
         # Build query to retrieve train/test set params
@@ -107,9 +99,6 @@ class Optimizer:
         paramsQuery_sb.write("group by  os.OptimizerRunSet, o.OptimizerRun, p.Board_ID ")
         self.paramsTrainSet_df = pd.read_sql_query(paramsQuery_sb.getvalue(), self.sqlConn,
                                                    params=[self.optimizerRunSet])
-        # self.sqliteCursor.execute(paramsQuery_sb.getvalue(), [self.optimizerRunSet])
-        # paramsTrainSet_df = pd.DataFrame(self.sqliteCursor.fetchall(),
-        #                                    columns=[d[0] for d in self.sqliteCursor.description])
         self.paramsTrainSet_df.sort_values(['OptimizerRun'], inplace=True)
         paramsQuery_sb.close()
 
@@ -136,11 +125,7 @@ class Optimizer:
         resultsQuery_sb.write("group by  os.OptimizerRunSet, o.OptimizerRun, r.Board_ID ")
         self.resultsTrainSet_df = pd.read_sql_query(resultsQuery_sb.getvalue(), self.sqlConn,
                                                     params=[self.optimizerRunSet])
-        # self.sqliteCursor.execute(resultsQuery_sb.getvalue(), [self.optimizerRunSet])
-        # resultsTrainSet_df = pd.DataFrame(self.sqliteCursor.fetchall(),
-        #                                    columns=[d[0] for d in self.sqliteCursor.description])
         self.resultsTrainSet_df.sort_values(['OptimizerRun'], inplace=True)
-        temp = resultsQuery_sb.getvalue()
         resultsQuery_sb.close()
 
         # Join together into single set
@@ -216,13 +201,6 @@ class Optimizer:
         # Sum of squared differences
         sum_squared_diff = mean_squared_error(y_test, y_pred)
 
-        # y_pred.to_csv("C:\\Users\\Dell 5290\\Documents\\cribs-and-ladders\\etc\\y_predicts\\y_pred-{}-{}-{}-{}-{}.csv".format(
-        #                                              dt.datetime.now().strftime("%Y-%m-%d--%H-%M"), testtotraindataratio, trainrandomstate, trainlearningrate,
-        #                                              trainnumestimators))
-        # y_test.to_csv("C:\\Users\\Dell 5290\\Documents\\cribs-and-ladders\\etc\\y_predicts\\y_test-{}-{}-{}-{}-{}.csv".format(
-        #                                              dt.datetime.now().strftime("%Y-%m-%d--%H-%M"), testtotraindataratio, trainrandomstate, trainlearningrate,
-        #                                              trainnumestimators,))
-
         print(str(sum_squared_diff))
 
         test = pd.DataFrame(columns=X_test.columns)
@@ -230,13 +208,8 @@ class Optimizer:
 
         opt = pd.DataFrame(model.predict(test), columns=y_test.columns)
 
-        # opt.to_csv("C:\\Users\\Dell 5290\\Documents\\cribs-and-ladders\\etc\\y_predicts\\opt-{}-{}-{}-{}-{}.csv".format(
-        #                                              dt.datetime.now().strftime("%Y-%m-%d--%H-%M"), testtotraindataratio, trainrandomstate, trainlearningrate,
-        #                                              trainnumestimators,))
-
         print(opt.to_dict())
 
-        # optFormatted = pd.DataFrame(columns=['track_id', 'Param', 'value'])
         optFormatted = opt.transpose()
         optFormatted['track_id'] = optFormatted.index.str[-2:].astype(int)
         optFormatted['Param'] = optFormatted.index.str[:-4]
@@ -281,13 +254,6 @@ class Optimizer:
 
         # Sum of squared differences
         sum_squared_diff = mean_squared_error(y_test, y_pred)
-
-        # y_pred.to_csv("C:\\Users\\Dell 5290\\Documents\\cribs-and-ladders\\etc\\y_predicts\\y_pred-{}-{}-{}-{}-{}.csv".format(
-        #                                              dt.datetime.now().strftime("%Y-%m-%d--%H-%M"), testtotraindataratio, trainrandomstate, trainlearningrate,
-        #                                              trainnumestimators))
-        # y_test.to_csv("C:\\Users\\Dell 5290\\Documents\\cribs-and-ladders\\etc\\y_predicts\\y_test-{}-{}-{}-{}-{}.csv".format(
-        #                                              dt.datetime.now().strftime("%Y-%m-%d--%H-%M"), testtotraindataratio, trainrandomstate, trainlearningrate,
-        #                                              trainnumestimators,))
 
         print(str(sum_squared_diff))
         return sum_squared_diff
