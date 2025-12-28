@@ -16,9 +16,33 @@ from mystic.monitors import VerboseMonitor
 import game_params as gp
 
 
-
 class Optimizer:
     def __init__(self, board, optimizerRunSet):
+        """
+        Initialize the Optimizer object.
+
+        Args:
+            board (Board): The board to optimize.
+            optimizerRunSet (int): The identifier for the optimizer run set.
+
+        Attributes:
+            prevParams (list): A list of previous parameters.
+            params (list): A list of current parameters.
+            prevResults (list): A list of previous results.
+            freshResults (list): A list of fresh results.
+            bestPostIterParams (list): A list of best post-iteration parameters.
+            bestPostFminParams (list): A list of best post-FMIN parameters.
+            board (Board): The board to optimize.
+            optimizerRunSet (int): The identifier for the optimizer run set.
+            sqlConn (sqlite3.Connection): The SQLite database connection.
+            sqliteCursor (sqlite3.Cursor): The SQLite database cursor.
+            trainFullSet_df (pandas.DataFrame): The DataFrame containing the training set.
+            paramsTrainSet_df (pandas.DataFrame): The DataFrame containing the parameters of the training set.
+            resultsTrainSet_df (pandas.DataFrame): The DataFrame containing the results of the training set.
+            pairings_df (pandas.DataFrame): The DataFrame containing the pairings of parameters.
+            absoluteBounds (pandas.DataFrame): The DataFrame containing the absolute bounds of the parameters.
+            fminParamsList (list): A list of parameters for FMIN optimization.
+        """
         self.prevParams = []
         self.params = []
         self.prevResults = []
@@ -37,7 +61,20 @@ class Optimizer:
         self.fminParamsList = []
 
     def retrieveTrainData(self):
-        #Retrieve eligible param settings from db
+        # Retrieve eligible param settings from db
+        """
+        Retrieve the training set data for the given optimizer run set.
+
+        This method retrieves the eligible parameter settings from the database,
+        builds a query to retrieve the train/test set parameters, and
+        retrieves the optimizer result train set data.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         boardID = self.board.boardID
         query = "SELECT Param, MIN(Track_ID) AS Elig_Track_ID FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID >= ? AND Active = ? GROUP BY Param"
         trackparamranges_df = pd.read_sql_query(query, self.sqlConn, params=[self.board.boardID, 0, 1])
@@ -46,7 +83,7 @@ class Optimizer:
         #                                               columns=[d[0] for d in self.sqliteCursor.description])
         trackparamranges_df.sort_values(['Param'], inplace=True)
 
-        #Build query to retrieve train/test set params
+        # Build query to retrieve train/test set params
         paramsQuery_sb = StringIO()
         paramsQuery_sb.write("select os.OptimizerRunSet, o.OptimizerRun, p.Board_ID")
         for t in self.board.tracks:
@@ -68,17 +105,18 @@ class Optimizer:
         paramsQuery_sb.write("on os.OptimizerRunSet = o.OptimizerRunSet ")
         paramsQuery_sb.write("where os.OptimizerRunSet = ? ")
         paramsQuery_sb.write("group by  os.OptimizerRunSet, o.OptimizerRun, p.Board_ID ")
-        self.paramsTrainSet_df = pd.read_sql_query(paramsQuery_sb.getvalue(), self.sqlConn, params=[self.optimizerRunSet])
+        self.paramsTrainSet_df = pd.read_sql_query(paramsQuery_sb.getvalue(), self.sqlConn,
+                                                   params=[self.optimizerRunSet])
         # self.sqliteCursor.execute(paramsQuery_sb.getvalue(), [self.optimizerRunSet])
         # paramsTrainSet_df = pd.DataFrame(self.sqliteCursor.fetchall(),
         #                                    columns=[d[0] for d in self.sqliteCursor.description])
         self.paramsTrainSet_df.sort_values(['OptimizerRun'], inplace=True)
         paramsQuery_sb.close()
 
-        #Retrieve optimizer result train set data
+        # Retrieve optimizer result train set data
         query = ("SELECT r.Result FROM OptimizerRunResults r INNER JOIN OptimizerRuns op " +
                  " ON op.OptimizerRun = r.OptimizerRun INNER JOIN OptimizerRunSets os on " +
-                " os.OptimizerRunSet = op.OptimizerRunSet WHERE os.OptimizerRunSet = ? GROUP BY r.Result")
+                 " os.OptimizerRunSet = op.OptimizerRunSet WHERE os.OptimizerRunSet = ? GROUP BY r.Result")
         posResults_df = pd.read_sql_query(query, self.sqlConn, params=[self.optimizerRunSet])
         posResults_df.sort_values(['Result'], inplace=True)
         resultsQuery_sb = StringIO()
@@ -96,7 +134,8 @@ class Optimizer:
         resultsQuery_sb.write("on os.OptimizerRunSet = o.OptimizerRunSet ")
         resultsQuery_sb.write("where os.OptimizerRunSet = ? ")
         resultsQuery_sb.write("group by  os.OptimizerRunSet, o.OptimizerRun, r.Board_ID ")
-        self.resultsTrainSet_df = pd.read_sql_query(resultsQuery_sb.getvalue(), self.sqlConn, params=[self.optimizerRunSet])
+        self.resultsTrainSet_df = pd.read_sql_query(resultsQuery_sb.getvalue(), self.sqlConn,
+                                                    params=[self.optimizerRunSet])
         # self.sqliteCursor.execute(resultsQuery_sb.getvalue(), [self.optimizerRunSet])
         # resultsTrainSet_df = pd.DataFrame(self.sqliteCursor.fetchall(),
         #                                    columns=[d[0] for d in self.sqliteCursor.description])
@@ -104,15 +143,28 @@ class Optimizer:
         temp = resultsQuery_sb.getvalue()
         resultsQuery_sb.close()
 
-        #Join together into single set
+        # Join together into single set
         self.trainFullSet_df = pd.merge(
-                        self.paramsTrainSet_df,      # First DataFrame
-                        self.resultsTrainSet_df,     # Second DataFrame
-                        on=['OptimizerRunSet', 'OptimizerRun', 'Board_ID'],  # Columns to join on
-                        how='inner'  # Type of join: 'inner', 'left', 'right', or 'outer'
-                        )
+            self.paramsTrainSet_df,  # First DataFrame
+            self.resultsTrainSet_df,  # Second DataFrame
+            on=['OptimizerRunSet', 'OptimizerRun', 'Board_ID'],  # Columns to join on
+            how='inner'  # Type of join: 'inner', 'left', 'right', or 'outer'
+        )
 
     def retrievePairingsSettings(self):
+        """
+        Retrieves the active optimizer parameter pairings and absolute bounds for the current board.
+
+        Parameters:
+            self (Optimizer): The optimizer object to retrieve settings from.
+
+        Returns:
+            None
+
+        Notes:
+            - Retrieves active parameter pairings from the database.
+            - Retrieves absolute bounds for the current board from the database.
+        """
         query = "SELECT * FROM OptimizerParamPairings WHERE Active = ?"
         self.pairings_df = pd.read_sql_query(query, self.sqlConn, params=[1])
         self.pairings_df.set_index(['Result'], inplace=True)
@@ -123,13 +175,28 @@ class Optimizer:
         self.absoluteBounds.set_index(['Param'], inplace=True)
         self.absoluteBounds.sort_index(inplace=True)
 
-
     def runGBM(self):
-        #Run GBM train
-        #NOTE: we are using results as X since we want to train regression model to output optimal input params to Cribs model
-        X = self.resultsTrainSet_df.drop(['OptimizerRunSet', 'OptimizerRun' ,'Board_ID'], axis=1)
+        # Run GBM train
+        # NOTE: we are using results as X since we want to train regression model to output optimal input params to Cribs model
+        """
+        Runs a Gradient Boosting Machine (GBM) to predict the optimal parameters to Cribs model given a set of results.
+
+        Parameters:
+            self (Optimizer): The optimizer object to retrieve settings from.
+
+        Returns:
+            optFormatted (pandas.DataFrame): A DataFrame containing the optimal parameters for Cribs model.
+            model (MultiOutputRegressor): The trained GMB model.
+            sum_squared_diff (float): The sum of the squared differences between the predicted and actual values.
+
+        Notes:
+            - Retrieves active parameter pairings from the database.
+            - Retrieves absolute bounds for the current board from the database.
+            - Runs a GMB model to predict the optimal parameters to Cribs model given a set of results.
+        """
+        X = self.resultsTrainSet_df.drop(['OptimizerRunSet', 'OptimizerRun', 'Board_ID'], axis=1)
         # X = self.resultsTrainSet_df.drop(['OptimizerRunSet', 'OptimizerRun' ,'Board_ID', 'eventsHitLengthDistribution_curvefit', 'eventSpacingHist_curvefit'], axis=1)
-        y = self.paramsTrainSet_df.drop(['OptimizerRunSet', 'OptimizerRun' ,'Board_ID'], axis=1)
+        y = self.paramsTrainSet_df.drop(['OptimizerRunSet', 'OptimizerRun', 'Board_ID'], axis=1)
         testtotraindataratio = self.setParamFromBounds(gp.testtotraindataratio_bnds)
         trainrandomstate = self.setParamFromBounds(gp.trainrandomstate_bnds)
         trainlearningrate = self.setParamFromBounds(gp.trainlearningrate_bnds)
@@ -143,7 +210,7 @@ class Optimizer:
         model = MultiOutputRegressor(lgb_model)
         model.fit(X_train, y_train)
 
-        #Compare predictions w/ actuals
+        # Compare predictions w/ actuals
         y_pred = pd.DataFrame(model.predict(X_test))
 
         # Sum of squared differences
@@ -177,11 +244,25 @@ class Optimizer:
 
         print(optFormatted.to_dict())
 
-
         return optFormatted, model, sum_squared_diff
 
     def testGBMOnPairings(self, optPairings, param):
-        #TEMP!!
+        # TEMP!!
+        """
+        Tests the Gradient Boosting Machine (GBM) model on the given pairings and param.
+
+        Parameters:
+            optPairings (list): A list of pairings to test the GMB model on.
+            param (str): The parameter to test the GBM model on.
+
+        Returns:
+            sum_squared_diff (float): The sum of the squared differences between the predicted and actual values.
+
+        Notes:
+            - Retrieves the active optimizer parameter pairings from the database.
+            - Retrieves absolute bounds for the current board from the database.
+            - Runs a GMB model to predict the optimal parameters to Cribs model given a set of results.
+        """
         resultsPreChanges = self.resultsTrainSet_df[self.resultsTrainSet_df['OptimizerRun'] < 1725]
         paramsPreChanges = self.paramsTrainSet_df[self.paramsTrainSet_df['OptimizerRun'] < 1725]
         X = resultsPreChanges[optPairings]
@@ -211,7 +292,22 @@ class Optimizer:
         print(str(sum_squared_diff))
         return sum_squared_diff
 
-    def runIncrIteration (self, freshParams, freshResults):
+    def runIncrIteration(self, freshParams, freshResults):
+        """
+        Runs an incremental iteration.
+
+        Parameters:
+            freshParams (list): A list of updated parameters.
+            freshResults (list): A list of updated results.
+
+        Returns:
+            list: A list of updated parameters.
+
+        Notes:
+            - Retrieves active parameter pairings from the database.
+            - Retrieves absolute bounds for the current board from the database.
+            - Runs a GMB model to predict the optimal parameters to Cribs model given a set of results.
+        """
         self.params = freshParams
         self.freshResults = freshResults
 
@@ -220,12 +316,12 @@ class Optimizer:
         params_df.sort_index(inplace=True)
         params_df['valueChanged'] = False
 
-        #Determine which result to target
+        # Determine which result to target
         results_df = pd.DataFrame.from_records(freshResults)
         results_df['EffIterResult'] = np.where(results_df['ResultValueIterative'].notna(),
                                                results_df['ResultValueIterative'], results_df['ResultValue'])
-        #NOTE: we use absolutified for WeighedResult since we are trying to find greatest offender
-        results_df['WeighedResult'] = abs(results_df['ResultValue'])*results_df['Weighting']
+        # NOTE: we use absolutified for WeighedResult since we are trying to find greatest offender
+        results_df['WeighedResult'] = abs(results_df['ResultValue']) * results_df['Weighting']
         results_df.sort_values(['WeighedResult'], ascending=False, inplace=True)
         target, targetPairings_l = None, []
         trackwise, track_ID, resultType = False, -1, ""
@@ -240,7 +336,7 @@ class Optimizer:
                 resultType = result_sr['Result'][:start_index - len("_T")]
             else:
                 resultType = result_sr['Result']
-            #Some results do not have pairings
+            # Some results do not have pairings
             if not resultType in self.pairings_df.index: continue
             pairings = self.pairings_df.loc[resultType]
             if isinstance(pairings, pd.DataFrame):
@@ -255,26 +351,27 @@ class Optimizer:
 
             print("Targetting: {} with weighted score: {}".format(result_sr['Result'], result_sr['WeighedResult']))
 
-            #Incr or decr paired params dep on whether inverse or not
-            #Pick random pairing if mult exist
+            # Incr or decr paired params dep on whether inverse or not
+            # Pick random pairing if mult exist
             reverse = -1 if target['EffIterResult'] < 0 else 1
             for pairing_dct in targetPairings_l:
                 if trackwise != (pairing_dct['Trackwise'] == 1): continue
                 inverse = -1 if pairing_dct['Inverse'] > 0 else 1
                 absbounds_sr = self.absoluteBounds.loc[pairing_dct['Param']]
                 targetParams_df = params_df.loc[pairing_dct['Param']]
-                if isinstance(targetParams_df, pd.Series): targetParams_df=pd.DataFrame([targetParams_df])
+                if isinstance(targetParams_df, pd.Series): targetParams_df = pd.DataFrame([targetParams_df])
                 for idx, targetParam_sr in targetParams_df.iterrows():
-                    #If balance, reverse on opposing tracks
+                    # If balance, reverse on opposing tracks
                     reverseTrackwise = 1
                     if trackwise:
                         if targetParam_sr['track_id'] == int(track_ID):
                             reverseTrackwise = 1
                         elif resultType == "balance":
                             reverseTrackwise = -1
-                        else: continue
+                        else:
+                            continue
 
-                    #Don't try to change a value 2x in a single incr!
+                    # Don't try to change a value 2x in a single incr!
                     if targetParam_sr['valueChanged']: continue
                     # if absbounds_sr['isInt'] == 1:
                     #     #Incr/decr by 1 if int
@@ -282,7 +379,7 @@ class Optimizer:
                     #     newVal = targetParam_sr['value']*(1.0 - reverse*inverse*reverseTrackwise*gp.changepctperiteration)
                     # else:
                     #     newVal = targetParam_sr['value']*(1.0 - reverse*inverse*reverseTrackwise*gp.changepctperiteration)
-                    changeAmt = ((absbounds_sr['UBound'] - absbounds_sr['LBound'])*gp.changebaseincrperiter
+                    changeAmt = ((absbounds_sr['UBound'] - absbounds_sr['LBound']) * gp.changebaseincrperiter
                                  * result_sr['WeighedResult'])
                     newVal = targetParam_sr['value'] - (reverse * inverse * reverseTrackwise * changeAmt)
 
@@ -300,7 +397,7 @@ class Optimizer:
                 if atLeastOneValueChanged: break
             if atLeastOneValueChanged: break
 
-        #Close up
+        # Close up
         params_df['param'] = params_df.index
         self.params = []
         for idx, sr in params_df.iterrows():
@@ -311,11 +408,36 @@ class Optimizer:
         return self.params
 
     def detWeighedScoring(self, freshResults):
+        """
+        Calculate a weighted scoring of the results.
+
+        This method takes a list of results from the optimizer and returns a
+        weighted scoring of those results. The weighted scoring is
+        calculated by multiplying the absolute value of each result by
+        its corresponding weight and summing the results.
+
+        Args:
+            freshResults (list): A list of results from the optimizer.
+
+        Returns:
+            float: The weighted scoring of the results.
+        """
         results_df = pd.DataFrame.from_records(freshResults)
-        results_df['WeighedResult'] = abs(results_df['ResultValue'])*results_df['Weighting']
+        results_df['WeighedResult'] = abs(results_df['ResultValue']) * results_df['Weighting']
         return results_df['WeighedResult'].sum()
 
     def getFminStarterParams(self):
+        """
+        Retrieve the starter parameters for the FMIN optimization.
+
+        This method retrieves the best parameters after the iteration process
+        and returns them as a list of values. The list is ordered by the
+        parameter name.
+
+        Returns:
+            list: A list of starter parameters for the FMIN optimization.
+
+        """
         starterParams_l = []
         bestParams_df = pd.DataFrame.from_records(self.bestPostIterParams)
         bestParams_df.set_index(['param'], inplace=True)
@@ -327,6 +449,20 @@ class Optimizer:
         return starterParams_l
 
     def getFminBounds(self, sampleParams):
+        """
+        Retrieve the bounds for the FMIN optimization.
+
+        This method takes a list of parameters and returns a list of bounds for
+        the FMIN optimization. The bounds are retrieved from the absolute bounds
+        table and are ordered by the parameter name.
+
+        Args:
+            sampleParams (list): A list of parameters to retrieve bounds for.
+
+        Returns:
+            list: A list of bounds for the FMIN optimization.
+
+        """
         selectBounds_l = []
         sampleParams_df = pd.DataFrame.from_records(sampleParams)
         sampleParams_df.set_index(['param'], inplace=True)
@@ -339,7 +475,21 @@ class Optimizer:
         return selectBounds_l
 
     def setBestFminParams(self, bestFminParams):
-        bestIter_df = pd.DataFrame.from_records( self.bestPostIterParams)
+        """
+        Sets the best FMIN parameters.
+
+        This method takes a list of parameters and updates the best post-FMIN parameters.
+
+        Args:
+            bestFminParams (list): A list of best FMIN parameters.
+
+        Returns:
+            None
+
+        Notes:
+            - Updates the best post-FMIN parameters.
+        """
+        bestIter_df = pd.DataFrame.from_records(self.bestPostIterParams)
         bestIter_df.set_index(['Param'], inplace=True)
         for idx in range(len(self.fminParamsList)):
             param_sr = bestIter_df.loc(self.fminParamsList[idx])
@@ -350,13 +500,40 @@ class Optimizer:
             paramLine = dict(track_id=sr['track_id'], param=sr['param'], value=sr['value'])
             self.bestPostFminParams.append(paramLine)
 
-
-
     def setBestIterParams(self, bestParams):
+        """
+        Sets the best iteration parameters.
+
+        This method takes a list of parameters and updates the best post-iteration parameters.
+
+        Args:
+            bestParams (list): A list of best iteration parameters.
+
+        Returns:
+            None
+
+        Notes:
+            - Updates the best post-iteration parameters.
+        """
         self.bestPostIterParams = bestParams
 
-
     def setupFminParamsList(self, sampleParams):
+        """
+        Set up the list of parameters for function minimization.
+
+        This method takes a list of parameters and sets up the list of parameters
+        for function minimization. It iterates through the active parameter pairings
+        and adds the parameter names to the list.
+
+        Args:
+            sampleParams (list): A list of parameters.
+
+        Returns:
+            None
+
+        Notes:
+            - Updates the list of parameters for function minimization.
+        """
         allPairings_df = self.pairings_df[self.pairings_df.index == "ALL"]
         sampleParams_df = pd.DataFrame.from_records(sampleParams)
         self.fminParamsList = []
@@ -364,13 +541,20 @@ class Optimizer:
             self.fminParamsList.append(pairing_sr['Param'])
 
     def setParamFromBounds(self, gameParamBounds):
+        """
+        Sets a parameter value from given bounds.
+
+        Args:
+            gameParamBounds (list): A list containing the lower bound, upper bound, and a boolean indicating if the parameter is an integer.
+
+        Returns:
+            float or int: The set parameter value.
+
+        Notes:
+            - If the parameter is an integer, it generates a random integer within the bounds.
+            - If the parameter is not an integer, it generates a random float within the bounds.
+        """
         if gameParamBounds[2]:
             return rd.randint(int(gameParamBounds[0]), int(gameParamBounds[1]))
         else:
             return rd.uniform(gameParamBounds[0], gameParamBounds[1])
-
-
-
-
-
-

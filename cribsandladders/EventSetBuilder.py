@@ -1,20 +1,18 @@
-# Maybe do set of events
+# TODO: Maybe do set of events
 # Run it, check scalar stats namely player balance
 # Try to finesse that out by cancelling ladders
-    # Probably some math formula, maybe like each event length (+/-) * likelihood of hitting it (1/board length) = event value,
-    # use this to scale back into within 5% score of others
-    # hmm maybe also add or retract "two-hit" events, whereby you set up the person to immed after a ladder hit a chute, or
-    # 2 shoots in a row, very strategically, to help balance uneven tracks
+# Probably some math formula, maybe like each event length (+/-) * likelihood of hitting it (1/board length) = event value,
+# use this to scale back into within 5% score of others
+# hmm maybe also add or retract "two-hit" events, whereby you set up the person to immed after a ladder hit a chute, or
+# 2 shoots in a row, very strategically, to help balance uneven tracks
 # select best of lot once hit finesse limit
 # compare shape to ideal histogram curve, plus factor in residual scalar quantities
 # use to drive next set
 # output specified best x number of trials
 import math
 import random as rd
-import sqlite3
 
 import game_params as gp
-import cribsandladders.PossibleEvents as ps
 import cribsandladders.BaseLayout as bse
 import cribsandladders.Board as bd
 import matplotlib.pyplot as plt
@@ -23,7 +21,6 @@ import copy as cp
 import Enums as en
 import bisect as bsc
 import pandas as pd
-from collections import Counter
 import sqlite3 as sql
 from datetime import datetime as dt
 from io import StringIO
@@ -33,12 +30,48 @@ import markovgame as mg
 
 import time
 
-#TODO: curvify lines, order by length in holes, curve it bspline? then iterate out making sure curve does not interfere with any neighbours
-#maybe do this as sep class, once have a board w/ tracks and events established, call Curvify
-#factor in occluded space for logo etc
+
+# TODO: curvify lines, order by length in holes, curve it bspline? then iterate out making sure curve does not interfere with any neighbours
+# maybe do this as sep class, once have a board w/ tracks and events established, call Curvify
+# factor in occluded space for logo etc
 
 class EventSetBuilder:
+    """
+    A class to build and optimize event sets for a board game with tracks and events.
+
+    The EventSetBuilder is responsible for generating and optimizing event configurations
+    on game tracks, including ladders and chutes, to ensure balanced gameplay.
+
+    Attributes:
+        board: The game board containing tracks and holes.
+        possibleEvents: Collection of possible events that can be placed on the board.
+        allTentLengthHisto: List to store length histograms of tentative event sets.
+        paramSet: ParamSet instance for managing event parameters.
+        orthos: Counter for orthogonal events.
+        multis: Counter for multi-segment events.
+        events: Counter for total events.
+        cancels: Counter for cancelled events.
+        eventNodesByTrack: List to store event nodes by track.
+        posHands: List of possible hand moves.
+        posHandProbs: Probabilities for hand moves.
+        posPegs: List of possible peg moves.
+        posPegProbs: Probabilities for peg moves.
+        pegRounds: List of peg rounds.
+        pegRoundProbs: Probabilities for peg rounds.
+        prevEffLengths_starter: List of effective lengths for each track.
+        avgScoreSum: Sum of average scores for optimization.
+        avgScoreDiv: Divisor for calculating average score.
+        avgScore: Calculated average score.
+    """
+
     def __init__(self, board, possibleEvents):
+        """
+        Initialize the EventSetBuilder with a game board and possible events.
+
+        Args:
+            board: The game board object containing tracks and holes.
+            possibleEvents: Object containing possible events that can be placed on the board.
+        """
         self.board = board
         self.possibleEvents = possibleEvents
         self.allTentLengthHisto = []
@@ -48,26 +81,30 @@ class EventSetBuilder:
         self.events = 0
         self.cancels = 0
         self.eventNodesByTrack = []
-        self.posHands =  [item["move"] for item in gp.probHandHist]
-        self.posHandProbs =  [item["prob"] for item in gp.probHandHist]
-        self.posPegs =  [item["move"] for item in gp.probPegHist]
-        self.posPegProbs =  [item["prob"] for item in gp.probPegHist]
-        self.pegRounds =  [item["rounds"] for item in gp.probPegRounds]
-        self.pegRoundProbs =  [item["prob"] for item in gp.probPegRounds]
+        self.posHands = [item["move"] for item in gp.probHandHist]
+        self.posHandProbs = [item["prob"] for item in gp.probHandHist]
+        self.posPegs = [item["move"] for item in gp.probPegHist]
+        self.posPegProbs = [item["prob"] for item in gp.probPegHist]
+        self.pegRounds = [item["rounds"] for item in gp.probPegRounds]
+        self.pegRoundProbs = [item["prob"] for item in gp.probPegRounds]
         self.prevEffLengths_starter = [dict(track_id=t.Track_ID, efflength=len(t.trackholes))
                                        for t in self.board.tracks]
         self.avgScoreSum, self.avgScoreDiv, self.avgScore = 0, 0, 0
 
-        #TEMPPP
+        # TEMPPP
         self.miniMarkovTime, self.scoringTime, self.totalTime, self.benchmarkSetupTime = 0, 0, 0, 0
 
-        #Load benchmarks
+        # Load benchmarks
         self.benchmarkMoves_df = None
         self.track_dict = None
         self.retrieveOrGenerateBenchmarkMoves()
 
-
     def clearEventSet(self):
+        """
+        Reset all event-related attributes to their initial state.
+
+        Clears all temporary data structures and counters used during event set generation.
+        """
         self.allTentLengthHisto = []
         self.orthos = 0
         self.multis = 0
@@ -80,6 +117,16 @@ class EventSetBuilder:
         self.avgScoreSum, self.avgScoreDiv, self.avgScore = 0, 0, 0
 
     def optimizeSetup(self):
+        """
+        Optimize the event set configuration for the game board.
+
+        Performs Monte Carlo simulation to find an optimal set of events
+        that provides balanced gameplay. Raises an exception if no valid
+        configuration is found within the maximum allowed iterations.
+
+        Raises:
+            Exception: If no valid event set is found within the maximum iterations.
+        """
         builditer = 0
         self.paramSet.monteCarlo()
         prevEffLengths = cp.deepcopy(self.prevEffLengths_starter)
@@ -87,18 +134,28 @@ class EventSetBuilder:
             builditer += 1
             if builditer > gp.maxitertrynewbuild:
                 raise Exception(
-                "Passed max # iters ({}) to find an event set.  ".format(gp.maxitertrynewbuild) +
-                "This board may not be feasible.  Try adding more folds in the tracks")
+                    "Passed max # iters ({}) to find an event set.  ".format(gp.maxitertrynewbuild) +
+                    "This board may not be feasible.  Try adding more folds in the tracks")
         self.buildSetIntoEvents()
-        #TEMPPP!
+        # TEMPPP!
         # self.plot_coordinates_and_vectors()
 
     def runMonteCarlo(self, optimizerRunSet, optimizerRun):
+        """
+        Run a Monte Carlo simulation to optimize event parameters.
+
+        Args:
+            optimizerRunSet: Identifier for the optimizer run set.
+            optimizerRun: Identifier for the specific optimizer run.
+
+        Returns:
+            bool: True if a valid event set was found, False otherwise.
+        """
         self.clearEventSet()
         self.paramSet.monteCarlo()
         self.paramSet.tempInsertParamsDb(optimizerRunSet, optimizerRun)
         builditer = 0
-        prevEffLengths = cp.deepcopy(self.prevEffLengths_starter) 
+        prevEffLengths = cp.deepcopy(self.prevEffLengths_starter)
         while not self.tryEventSet(self.paramSet, prevEffLengths):
             builditer += 1
             if builditer > gp.maxitertrynewbuild:
@@ -109,13 +166,23 @@ class EventSetBuilder:
         # self.plot_coordinates_and_vectors()
 
     def runMidpointInitParams(self, optimizerRunSet, optimizerRun):
+        """
+        Initialize parameters using midpoint values and attempt to build a valid event set.
+        
+        Args:
+            optimizerRunSet: Identifier for the optimizer run set.
+            optimizerRun: Identifier for the specific optimizer run.
+            
+        Raises:
+            Exception: If no valid event set is found within the maximum iterations.
+        """
         self.clearEventSet()
         self.paramSet.midpointInitParams()
         self.paramSet.tempInsertParamsDb(optimizerRunSet, optimizerRun)
         builditer = 0
-        prevEffLengths = cp.deepcopy(self.prevEffLengths_starter) 
+        prevEffLengths = cp.deepcopy(self.prevEffLengths_starter)
         while not self.tryEventSet(self.paramSet, prevEffLengths):
-            #TEMPPPP
+            # TEMPPPP
             # self.buildSetIntoEvents()
             # self.plot_coordinates_and_vectors()
             builditer += 1
@@ -126,16 +193,32 @@ class EventSetBuilder:
         self.buildSetIntoEvents()
         # self.plot_coordinates_and_vectors()
 
-
-    def setParamsIntoDb(self,optimizerRunSet, optimizerRun ):
+    def setParamsIntoDb(self, optimizerRunSet, optimizerRun):
+        """
+        Store the current parameter set in the database.
+        
+        Args:
+            optimizerRunSet: Identifier for the optimizer run set.
+            optimizerRun: Identifier for the specific optimizer run.
+        """
         self.paramSet.tempInsertParamsDb(optimizerRunSet, optimizerRun)
 
     def buildBoardFromParamsDb(self, optimizerRunSet, optimizerRun):
+        """
+        Build a board configuration using parameters from the database.
+        
+        Args:
+            optimizerRunSet: Identifier for the optimizer run set.
+            optimizerRun: Identifier for the specific optimizer run.
+            
+        Raises:
+            Exception: If no valid event set is found within the maximum iterations.
+        """
         self.clearEventSet()
         self.paramSet.intakeParamsFromDb(optimizerRunSet, optimizerRun)
         # self.paramSet.tempInsertParamsDb(100000+optimizerRun)
         builditer = 0
-        prevEffLengths = cp.deepcopy(self.prevEffLengths_starter) 
+        prevEffLengths = cp.deepcopy(self.prevEffLengths_starter)
         while not self.tryEventSet(self.paramSet, prevEffLengths):
             builditer += 1
             if builditer > gp.maxitertrynewbuild:
@@ -145,12 +228,24 @@ class EventSetBuilder:
         self.buildSetIntoEvents()
 
     def modParamsForFmin(self, paramsSubset, fminParamsList, optimizerRunSet, optimizerRun):
+        """
+        Modify parameters for function minimization and attempt to build a valid event set.
+        
+        Args:
+            paramsSubset: Subset of parameters to modify.
+            fminParamsList: List of parameter values for function minimization.
+            optimizerRunSet: Identifier for the optimizer run set.
+            optimizerRun: Identifier for the specific optimizer run.
+            
+        Raises:
+            Exception: If no valid event set is found within the maximum iterations.
+        """
         self.paramSet.modParamsForFmin(paramsSubset, fminParamsList)
 
         self.clearEventSet()
         self.paramSet.tempInsertParamsDb(optimizerRunSet, optimizerRun)
         builditer = 0
-        prevEffLengths = cp.deepcopy(self.prevEffLengths_starter) 
+        prevEffLengths = cp.deepcopy(self.prevEffLengths_starter)
         while not self.tryEventSet(self.paramSet, prevEffLengths):
             builditer += 1
             if builditer > gp.maxitertrynewbuild:
@@ -159,65 +254,86 @@ class EventSetBuilder:
                     "This board may not be feasible.  Try adding more folds in the tracks")
         self.buildSetIntoEvents()
 
-
     def buildBoardFromParams(self, instanceParams_df, optimizerRunSet, optimizerRun):
+        """
+        Build a board configuration using the provided parameters.
+        
+        Args:
+            instanceParams_df: DataFrame containing parameter configurations.
+            optimizerRunSet: Identifier for the optimizer run set.
+            optimizerRun: Identifier for the specific optimizer run.
+            
+        Returns:
+            List of event sets for each track if successful, None otherwise.
+        """
         self.clearEventSet()
         self.paramSet.intakeParams(instanceParams_df)
         builditer = 0
-        prevEffLengths = cp.deepcopy(self.prevEffLengths_starter) 
+        prevEffLengths = cp.deepcopy(self.prevEffLengths_starter)
         while not self.tryEventSet(self.paramSet, prevEffLengths):
             builditer += 1
             if builditer > gp.maxitertrynewbuild:
                 print("Passed max # iters ({}) to find an event set.  ".format(gp.maxitertrynewbuild) +
-                    "This board may not be feasible.  Try adding more folds in the tracks")
+                      "This board may not be feasible.  Try adding more folds in the tracks")
                 return None
         self.paramSet.tempInsertParamsDb(optimizerRunSet, optimizerRun)
         self.buildSetIntoEvents()
         return [t.eventSetBuild for t in self.board.tracks]
 
     def plotBoard(self):
+        """
+        Generate a plot of the current board configuration.
+        
+        This creates a visual representation of the board with all tracks and events.
+        """
         self.plot_coordinates_and_vectors()
 
     def retrieveOrGenerateBenchmarkMoves(self):
+        """
+        Retrieve benchmark moves from the database or generate new ones if none exist.
+        
+        This method manages the benchmark moves used for evaluating board configurations.
+        It will either load existing benchmarks from the database or generate new ones
+        by simulating moves on the current track configuration.
+        """
         start_time = time.time()
         with contextlib.closing(sql.connect('etc/Optimizer.db')) as sqlConn:
             with sqlConn:
                 with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
-                    #Try retrieve benchmark moves
+                    # Try retrieve benchmark moves
                     query = "SELECT * FROM BenchmarkMoves WHERE Board_ID = ?"
                     sqliteCursor.execute(query, [self.board.boardID])
                     self.benchmarkMoves_df = pd.DataFrame(sqliteCursor.fetchall(),
-                                                       columns=[d[0] for d in sqliteCursor.description])
+                                                          columns=[d[0] for d in sqliteCursor.description])
         if len(self.benchmarkMoves_df) == 0:
-            #Generate new benchmark moves out to double track length
+            # Generate new benchmark moves out to double track length
             insertQuery = "INSERT INTO BenchmarkMoves VALUES(?,?,?,?,?)"
             for t in self.board.tracks:
                 with contextlib.closing(sql.connect('etc/Optimizer.db')) as sqlConn:
                     with sqlConn:
                         with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
                             sqliteCursor.execute("BEGIN TRANSACTION")
-                            effLength, sequences = self.runPartialTrackEffLengthHoles(t.Track_ID,[],
-                                                                                      2*len(t.trackholes))
+                            effLength, sequences = self.runPartialTrackEffLengthHoles(t.Track_ID, [],
+                                                                                      2 * len(t.trackholes))
                             for trial in range(len(sequences)):
                                 for move in range(len(sequences[trial])):
                                     sqliteCursor.execute(insertQuery, [self.board.boardID, t.Track_ID, trial, move,
                                                                        sequences[trial][move]])
                             sqliteCursor.execute("END TRANSACTION")
 
-            #Retrieve newly created benchmarks
+            # Retrieve newly created benchmarks
             with contextlib.closing(sql.connect('etc/Optimizer.db')) as sqlConn:
                 with sqlConn:
                     with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
-                        #Try retrieve benchmark moves
+                        # Try retrieve benchmark moves
                         query = "SELECT * FROM BenchmarkMoves WHERE Board_ID = ?"
                         sqliteCursor.execute(query, [self.board.boardID])
                         self.benchmarkMoves_df = pd.DataFrame(sqliteCursor.fetchall(),
-                                                           columns=[d[0] for d in sqliteCursor.description])
+                                                              columns=[d[0] for d in sqliteCursor.description])
 
-        #Index & sort
+        # Index & sort
         # self.benchmarkMoves_df.set_index(['Track_ID', 'Trial', 'MoveNum'], inplace=True)
         # self.benchmarkMoves_df.sort_index(inplace=True)
-
 
         # Initialize a dictionary to hold the lists per Track_ID
         track_dict = defaultdict(list)
@@ -247,41 +363,73 @@ class EventSetBuilder:
             for i in range(len(self.track_dict[track_id])):
                 self.track_dict[track_id][i] = [val for val in self.track_dict[track_id][i]]
         end_time = time.time()
-        self.benchmarkSetupTime += end_time- start_time
+        self.benchmarkSetupTime += end_time - start_time
 
-    def buildPartialSetIntoTrack (self, track, startPoint, stopPoint):
-            for e in range(startPoint, stopPoint):
-                if len(track.candidateEvents.candidateEvents) == 0:
-                    dsfd ="sdfds"
-                #TODO: maybe start at beginning of tracks, work way up, event by event, iterating thru tracks, base spacing events tot
-                #Try to follow a given story arc!  Maybe take input curve, try to follow it best fir
-                currEvent = rd.choice(track.candidateEvents.candidateEvents)
-                #TEMP:
-                #TODO: figure this out in possible events, for now just excluding here
-                # if not currEvent.isOrtho:
-                #     searchRect = self.cartesian_bounding_box(self.orthoBoundingBox(currEvent.crowVector))
-                #     intercPoints = self.possibleEvents.points_in_rectangle([t.coords for t in track.trackholes], searchRect)
-                #     intercVects = self.possibleEvents.build_interception_test_vector_set([t.coords for t in track.trackholes],
-                #                                                           intercPoints)
-                #     holesHit = []
-                #     if not self.possibleEvents.check_intersections({(currEvent.startHole.coords, currEvent.endHole.coords)},
-                #                                                intercVects, currEvent.startHole.coords, currEvent.endHole.coords,
-                #                                                holesHit,track.num):
-                track.addTentativeEvent(currEvent)
+    def buildPartialSetIntoTrack(self, track, startPoint, stopPoint):
+        """
+        Build a partial set of events into a track between specified points.
+        
+        This method adds events to a track between the given start and stop points,
+        handling both regular and shared events that may span multiple tracks.
+        
+        Args:
+            track: The track to add events to.
+            startPoint: Starting index for event selection.
+            stopPoint: Ending index for event selection.
+            
+        Note:
+            For shared events, this will also add linked events to other tracks.
+        """
+        for e in range(startPoint, stopPoint):
+            if len(track.candidateEvents.candidateEvents) == 0:
+                dsfd = "sdfds"
+            # TODO: maybe start at beginning of tracks, work way up, event by event, iterating thru tracks, base spacing events tot
+            # Try to follow a given story arc!  Maybe take input curve, try to follow it best fir
+            currEvent = rd.choice(track.candidateEvents.candidateEvents)
+            # TEMP:
+            # TODO: figure this out in possible events, for now just excluding here
+            # if not currEvent.isOrtho:
+            #     searchRect = self.cartesian_bounding_box(self.orthoBoundingBox(currEvent.crowVector))
+            #     intercPoints = self.possibleEvents.points_in_rectangle([t.coords for t in track.trackholes], searchRect)
+            #     intercVects = self.possibleEvents.build_interception_test_vector_set([t.coords for t in track.trackholes],
+            #                                                           intercPoints)
+            #     holesHit = []
+            #     if not self.possibleEvents.check_intersections({(currEvent.startHole.coords, currEvent.endHole.coords)},
+            #                                                intercVects, currEvent.startHole.coords, currEvent.endHole.coords,
+            #                                                holesHit,track.num):
+            track.addTentativeEvent(currEvent)
 
-                if currEvent.isShared:
-                    for link in currEvent.linkedEvents:
-                        # NOTE: this may push us a little above the max.  Overdrive baybeeeee 8-P
-                        self.board.getTrackByNum(link.trackNum).addTentativeEvent(link)
+            if currEvent.isShared:
+                for link in currEvent.linkedEvents:
+                    # NOTE: this may push us a little above the max.  Overdrive baybeeeee 8-P
+                    self.board.getTrackByNum(link.trackNum).addTentativeEvent(link)
 
     def boundingBoxPlusVector(self, vector):
+        """
+        Create a bounding box around a vector with additional space.
+        
+        Args:
+            vector: A tuple of two points defining the vector.
+            
+        Returns:
+            A tuple containing the original vector and the four sides of the bounding box.
+        """
         intersects = [vector]
         corners = self.orthoBoundingBox(vector)
-        for i in range(0,4):
-            intersects.append((corners[i], corners[(i+1)%4]))
+        for i in range(0, 4):
+            intersects.append((corners[i], corners[(i + 1) % 4]))
         return tuple(intersects)
 
     def orthoBoundingBox(self, vector):
+        """
+        Create an orthogonal bounding box around a vector.
+        
+        Args:
+            vector: A tuple of two points defining the vector.
+            
+        Returns:
+            A tuple of four points defining the corners of the bounding box.
+        """
         ortho_dxdy = self.possibleEvents.orthogonal_vector(vector[0], vector[1], gp.eventminspacing / 2.0, False)
         revOrtho_dxdy = [(-1) * d for d in ortho_dxdy]
         corners = []
@@ -292,13 +440,31 @@ class EventSetBuilder:
         corners = [corners[0], corners[1], corners[3], corners[2]]
         return tuple(corners)
 
-    def getNormLengthDistCurve (self):
+    def getNormLengthDistCurve(self):
+        """
+        Get the normalized length distribution curve.
+        
+        Returns:
+            List of (x, y) points representing the normalized length distribution curve.
+        """
         return self.getNormalizedIdealCurve(gp.eventlengthdisthistcurvefile)
 
-    def getNormLengthOverTimeCurve (self):
+    def getNormLengthOverTimeCurve(self):
+        """
+        Get the normalized length over time curve.
+        
+        Returns:
+            List of (x, y) points representing the length over time curve.
+        """
         return self.getNormalizedIdealCurve(gp.eventlengthovertimeidealcurve1file)
 
-    def getEnergyCurve (self):
+    def getEnergyCurve(self):
+        """
+        Get the energy curve for event placement.
+        
+        Returns:
+            Tuple containing the energy curve and its normalized integral.
+        """
         # Normalize the coordinates
         energyCurve = self.getNormalizedIdealCurve(gp.eventenergyfile)
 
@@ -309,6 +475,15 @@ class EventSetBuilder:
         return energyCurve, energyNormIntegral
 
     def getNormalizedIdealCurve(self, curveFile):
+        """
+        Load and normalize a curve from an SVG file.
+        
+        Args:
+            curveFile: Path to the SVG file containing the curve.
+            
+        Returns:
+            List of normalized (x, y) coordinates representing the curve.
+        """
         rawCurve = np.array(bse.svgParserHoles(curveFile, returnRawCoords=True))
         # Extract all x and y values
         x_values = [coord[0] for coord in rawCurve]
@@ -329,18 +504,37 @@ class EventSetBuilder:
         return normCurve
 
     def integrateAndNormalizeCurve(self, curve, normalizer):
+        """
+        Integrate and normalize a curve.
+        
+        Args:
+            curve: List of (x, y) points representing the curve.
+            normalizer: Value to normalize the y-values by.
+            
+        Returns:
+            Integrated and normalized curve as a list of (x, y) points.
+        """
         integrated_curve = []
         for i in range(0, len(curve)):
-            normx=curve[i][0]
+            normx = curve[i][0]
             if i == 0:
-                normy = curve[i][1]/normalizer
+                normy = curve[i][1] / normalizer
             else:
-                normy = integrated_curve[i-1][1] + curve[i][1]/normalizer
+                normy = integrated_curve[i - 1][1] + curve[i][1] / normalizer
             integrated_curve.append((normx, normy))
 
         return integrated_curve
 
     def normalizeCurveMagnitude(self, curve):
+        """
+        Normalize the magnitude of a curve.
+        
+        Args:
+            curve: List of (x, y) points representing the curve.
+            
+        Returns:
+            Curve with y-values normalized to the range [-1, 1].
+        """
         normalizer = max(abs(max([c[1] for c in curve])), abs(min([c[1] for c in curve])))
         if normalizer > 0:
             normalized_curve = []
@@ -351,28 +545,50 @@ class EventSetBuilder:
             return normalized_curve
         return curve
 
-
     def actualizeCurve(self, curve, x_actualizer, y_actualizer, integrate=False):
+        """
+        Scale a curve by given x and y factors, with optional integration.
+        
+        Args:
+            curve: List of (x, y) points representing the curve.
+            x_actualizer: Scaling factor for x-values.
+            y_actualizer: Scaling factor for y-values.
+            integrate: If True, accumulate y-values during scaling.
+            
+        Returns:
+            Scaled curve as a list of (x, y) points.
+        """
         actualized_curve = []
         for i in range(0, len(curve)):
-            actx = curve[i][0]*x_actualizer
+            actx = curve[i][0] * x_actualizer
             if integrate and i > 0:
                 acty = (curve[i - 1][1] + curve[i][1]) * y_actualizer
             else:
-                acty = curve[i][1]*y_actualizer
+                acty = curve[i][1] * y_actualizer
             actualized_curve.append((actx, acty))
 
         return actualized_curve
 
     def discretizeCurve(self, curve, numBuckets, accumulate=False):
-        #If accumulating, NORMALIZE AFTER!!!
+        """
+        Convert a continuous curve into discrete buckets.
+        
+        Args:
+            curve: List of (x, y) points representing the curve.
+            numBuckets: Number of discrete buckets to create.
+            accumulate: If True, accumulate y-values in each bucket.
+            
+        Returns:
+            Discretized curve as a list of (bucket, value) pairs.
+        """
+        # If accumulating, NORMALIZE AFTER!!!
         discretized_curve = []
         curveIdx = 0
-        discFactor = len(curve)/numBuckets
+        discFactor = len(curve) / numBuckets
         for i in range(0, numBuckets):
             discx = i + 1
             accum_y = 0.0
-            while curveIdx < len(curve)-1 and curveIdx < i*discFactor:
+            while curveIdx < len(curve) - 1 and curveIdx < i * discFactor:
                 if accumulate:
                     accum_y += curve[curveIdx][1]
                 curveIdx += 1
@@ -380,7 +596,7 @@ class EventSetBuilder:
                 if i == 0:
                     discy = accum_y
                 else:
-                    discy = 0.7*accum_y + 0.3*discretized_curve[i-1][1]
+                    discy = 0.7 * accum_y + 0.3 * discretized_curve[i - 1][1]
             else:
                 discy = curve[curveIdx][1]
             discretized_curve.append((discx, discy))
@@ -388,7 +604,18 @@ class EventSetBuilder:
         return discretized_curve
 
     def getPointsInProximity(self, searchRange, searchPoints, inputPoint):
-        #NOTE: searchPoints MUST BE SORTED!!
+        """
+        Find points within a specified range of an input point.
+        
+        Args:
+            searchRange: Tuple of (min, max) distances to search within.
+            searchPoints: List of points to search through.
+            inputPoint: The reference point for distance calculations.
+            
+        Returns:
+            List of dictionaries containing points and their distances from the input point.
+        """
+        # NOTE: searchPoints MUST BE SORTED!!
         pointPairs = []
         for p in searchPoints:
             if searchRange[0] <= (inputPoint - p) <= searchRange[1]:
@@ -396,35 +623,78 @@ class EventSetBuilder:
 
         return pointPairs
 
-    def tryGetDispAllowance (self, dispAllowances, proxPoint):
+    def tryGetDispAllowance(self, dispAllowances, proxPoint):
+        """
+        Try to get displacement allowance for a given proximity point.
+        
+        Args:
+            dispAllowances: List of displacement allowances.
+            proxPoint: Dictionary containing displacement information.
+            
+        Returns:
+            Dictionary with effect and modification values if found, or default values.
+        """
         allowance = next((allow for allow in dispAllowances
                           if allow['scalardisp'] == abs(proxPoint['disp'])), None)
         if allowance is not None:
             return dict(effect=allowance['isallowed'], mod=allowance['mod'])
         return dict(effect=False, mod=0)
 
-    def getEffectorsForDisps (self, basePoint, searchDisps, posEffectors, eventNodes, events = None, selfScaleLength = -1):
+    def getEffectorsForDisps(self, basePoint, searchDisps, posEffectors, eventNodes, events=None, selfScaleLength=-1):
+        """
+        Get effectors for specified displacements from a base point.
+        
+        Args:
+            basePoint: Starting point for displacement calculations.
+            searchDisps: List of displacements to search for.
+            posEffectors: List of possible effectors.
+            eventNodes: List of event node positions.
+            events: Optional list of events for scaling.
+            selfScaleLength: Length to use for self-scaling if events not provided.
+            
+        Returns:
+            List of effector configurations for the given displacements.
+        """
         effectors = []
         for p in searchDisps:
             idx = self.searchOrderedListForVal(eventNodes, basePoint + p)
             if idx > -1:
                 allowances = self.tryGetDispAllowance(posEffectors, dict(disp=abs(p)))
                 if events is None and selfScaleLength > -1:
-                    effectors.append(dict(effect=allowances['effect'], scaledmod=allowances['mod']*selfScaleLength,
-                                          scaledenergymod=abs(allowances['mod']*selfScaleLength)))
+                    effectors.append(dict(effect=allowances['effect'], scaledmod=allowances['mod'] * selfScaleLength,
+                                          scaledenergymod=abs(allowances['mod'] * selfScaleLength)))
                 elif events is not None and selfScaleLength == -1:
-                    effectors.append(dict(effect=allowances['effect'], scaledmod=allowances['mod']*events[idx]['length'],
-                                          scaledenergymod=abs(allowances['mod']*events[idx]['length'])))
+                    effectors.append(
+                        dict(effect=allowances['effect'], scaledmod=allowances['mod'] * events[idx]['length'],
+                             scaledenergymod=abs(allowances['mod'] * events[idx]['length'])))
                 else:
                     raise Exception("Must pass either self scale length, or oth events for searching")
 
         return effectors
 
-
-    def runPartialTrackEffLengthHoles (self, track_id, partialEventSet, trackActualLength, tentNewLadder=None, tentNewChute=None,
-                                       overrideIters = -1, readMode = False):
-        #Markov chain forecasting
-        #INCORPORATE CRIB EVERY N'TH TURNM!!
+    def runPartialTrackEffLengthHoles(self, track_id, partialEventSet, trackActualLength, tentNewLadder=None,
+                                      tentNewChute=None,
+                                      overrideIters=-1, readMode=False):
+        """
+        Calculate the effective track length considering the current event set.
+        
+        Uses Markov chain forecasting to simulate game play and determine the effective
+        length of the track when accounting for ladders and chutes.
+        
+        Args:
+            track_id: Identifier for the track.
+            partialEventSet: Current set of events on the track.
+            trackActualLength: The physical length of the track.
+            tentNewLadder: Optional tuple of (start, end) for a new ladder to test.
+            tentNewChute: Optional tuple of (start, end) for a new chute to test.
+            overrideIters: Override the default number of iterations for simulation.
+            readMode: If True, read moves from benchmark data instead of generating them.
+            
+        Returns:
+            Tuple of (effective_length, move_sequences) where effective_length is the
+            calculated effective length of the track and move_sequences contains the
+            sequences of moves made during simulation.
+        """
         partialEventMappings = [dict(start=e.startHole.num, end=e.endHole.num)
                                 for e in partialEventSet if e.instanceIsLadder]
         partialEventMappings.extend([dict(start=e.endHole.num, end=e.startHole.num)
@@ -437,7 +707,7 @@ class EventSetBuilder:
 
         effHoleMap = []
         eIdx = 0
-        #Extend track by 2 to incorporate start & finish holes
+        # Extend track by 2 to incorporate start & finish holes
         effHoleMap.append(0)
         for idx in range(trackActualLength):
             if eIdx < len(partialEventMappings) and partialEventMappings[eIdx]['start'] == idx + 1:
@@ -447,8 +717,7 @@ class EventSetBuilder:
                 effHoleMap.append(idx + 1)
         effHoleMap.append(trackActualLength + 1)
 
-
-        #Figure out length of partial game
+        # Figure out length of partial game
         movesAllTrials = 0
         if overrideIters < 0:
             iters = gp.probminimodeliters
@@ -461,7 +730,7 @@ class EventSetBuilder:
             curSequence = []
             curReadSeq = []
             for trial in range(iters):
-                #Set up trial gameplay
+                # Set up trial gameplay
                 startLoc = 0
                 if not readMode:
                     if trial > 0: sequencesOfMoves.append(curSequence)
@@ -476,7 +745,7 @@ class EventSetBuilder:
                 trackPosSeq = []
                 while curPos < trackActualLength:
                     if not readMode:
-                        #Run pegging:
+                        # Run pegging:
                         pegRounds = rd.choices(self.pegRounds, weights=self.pegRoundProbs, k=1)[0]
                         for r in range(pegRounds):
                             curMove = rd.choices(self.posPegs, weights=self.posPegProbs, k=1)[0]
@@ -489,29 +758,33 @@ class EventSetBuilder:
                             if curPos >= trackActualLength: break
                         if curPos >= trackActualLength: break
 
-                        #Score hand
+                        # Score hand
                         curMove = rd.choices(self.posHands, weights=self.posHandProbs, k=1)[0]
                         curSequence.append(curMove)
-                        if curPos + curMove > len(effHoleMap): curPos += curMove
-                        else: curPos = effHoleMap[curPos + curMove - 1]
+                        if curPos + curMove > len(effHoleMap):
+                            curPos += curMove
+                        else:
+                            curPos = effHoleMap[curPos + curMove - 1]
                         movesAllTrials += 1
                         if curPos >= trackActualLength: break
 
                         if dealer == 1:
-                            #Score crib
+                            # Score crib
                             curMove = rd.choices(self.posHands, weights=self.posHandProbs, k=1)[0]
                             curSequence.append(curMove)
-                            if curPos + curMove > len(effHoleMap): curPos += curMove
-                            else: curPos = effHoleMap[curPos + curMove - 1]
+                            if curPos + curMove > len(effHoleMap):
+                                curPos += curMove
+                            else:
+                                curPos = effHoleMap[curPos + curMove - 1]
                             movesAllTrials += 1
                             if curPos >= trackActualLength: break
-                        dealer = 1 + dealer%gp.numplayers
+                        dealer = 1 + dealer % gp.numplayers
                     else:
                         # curMove = self.benchmarkMoves_df.iloc[startLoc + moveCounter]['MoveVal']
                         curMove = curReadSeq[moveCounter]
-                        if moveCounter ==0:
+                        if moveCounter == 0:
                             countLoops += 1
-                        moveCounter = (moveCounter + 1)%len(curReadSeq)
+                        moveCounter = (moveCounter + 1) % len(curReadSeq)
                         if curPos + curMove > len(effHoleMap):
                             curPos += curMove
                         else:
@@ -519,34 +792,57 @@ class EventSetBuilder:
                         trackPosSeq.append(curPos)
                         movesAllTrials += 1
                         if countLoops > 10:
-                            #Track is stuck in an infinite loop!!! This event is no bueno
+                            # Track is stuck in an infinite loop!!! This event is no bueno
                             return 9999999, []
                         if curPos >= trackActualLength: break
             if not readMode: sequencesOfMoves.append(curSequence)
 
-            #Forecast length of game based on control-case ideal moves:hole ratio
-            actualPartialMoves = (movesAllTrials/iters)
-            eventlessCtrlPartialMoves = (gp.ideallikelihoodholehit*trackActualLength)
-            shiftPct = actualPartialMoves/eventlessCtrlPartialMoves
-            forecastedTrackEffLengthHoles = trackActualLength*shiftPct
+            # Forecast length of game based on control-case ideal moves:hole ratio
+            actualPartialMoves = (movesAllTrials / iters)
+            eventlessCtrlPartialMoves = (gp.ideallikelihoodholehit * trackActualLength)
+            shiftPct = actualPartialMoves / eventlessCtrlPartialMoves
+            forecastedTrackEffLengthHoles = trackActualLength * shiftPct
             return forecastedTrackEffLengthHoles, sequencesOfMoves
         else:
             start_time = time.time()
             test = [len(t) for t in self.track_dict[track_id]]
             forecastedTrackEffLengthHoles = mg.runPartialTrackEffLengthHoles(trackActualLength, gp.probminimodeliters,
                                                                              self.track_dict[track_id],
-                                                                             [len(t) for t in self.track_dict[track_id]],
+                                                                             [len(t) for t in
+                                                                              self.track_dict[track_id]],
                                                                              effHoleMap,
                                                                              gp.numplayers, gp.ideallikelihoodholehit)
             end_time = time.time()
             self.miniMarkovTime += (end_time - start_time)
             return forecastedTrackEffLengthHoles, None
 
-
-    def scoreEventsForHole (self, t, hole,
-                            chutes, chuteBases, chuteTops, ladders, ladderBases, ladderTops, params,trackEventsOverview,
-                            explicitEvent = None,
-                            explicitChute = False, explicitLadder = False):
+    def scoreEventsForHole(self, t, hole,
+                           chutes, chuteBases, chuteTops, ladders, ladderBases, ladderTops, params, trackEventsOverview,
+                           explicitEvent=None, explicitChute=False, explicitLadder=False):
+        """
+        Calculate a score for placing an event at a specific hole.
+        
+        Evaluates the impact of placing an event (ladder or chute) at the given hole
+        based on various factors including proximity to other events and game balance.
+        
+        Args:
+            t: Dictionary containing track information.
+            hole: The hole being evaluated for event placement.
+            chutes: List of existing chutes on the track.
+            chuteBases: List of base positions of chutes.
+            chuteTops: List of top positions of chutes.
+            ladders: List of existing ladders on the track.
+            ladderBases: List of base positions of ladders.
+            ladderTops: List of top positions of ladders.
+            params: Parameter set for scoring calculations.
+            trackEventsOverview: Overview of events on the track.
+            explicitEvent: Optional explicit event to evaluate.
+            explicitChute: If True, evaluate as a chute.
+            explicitLadder: If True, evaluate as a ladder.
+            
+        Returns:
+            List of dictionaries containing scoring information for potential events.
+        """
         start_time = time.time()
         if explicitEvent is None and hole.num < t['optfirstchute']: return []
 
@@ -574,7 +870,6 @@ class EventSetBuilder:
         #                                                                         *gp.ideallikelihoodholehit))
         # twohitboosts.append(dict(scalardisp=4, isallowed=t['compensationbuffer'] < 0, mod=gp.likelihoodoffourmove
         #                                                                         *gp.ideallikelihoodholehit))
-
 
         # # NOTE that we cannot fall before a laadder, since we are building forward from top of event
         # match spaceSinceLastChute:
@@ -610,13 +905,13 @@ class EventSetBuilder:
                 candEventSpecs = explicitEvent
 
             if explicitEvent is None and candEventSpecs['isshared']:
-                #if one or more tracks are locked, no multis!
-                #TODO: get multis working w/ elim mode
+                # if one or more tracks are locked, no multis!
+                # TODO: get multis working w/ elim mode
                 # if t['nomultis']:
                 t['candcursor'] += 1
                 continue
 
-                #Check if linked event is legal
+                # Check if linked event is legal
                 assertLegal = True
                 for ev in candEventSpecs['event'].linkedEvents:
                     linkedStart = ev.startHole.num
@@ -624,7 +919,7 @@ class EventSetBuilder:
                     linkedTrackNum = ev.trackNum
                     t_sub = None
                     for t_match in trackEventsOverview:
-                        if t_match['tracknum'] ==linkedTrackNum:
+                        if t_match['tracknum'] == linkedTrackNum:
                             t_sub = t_match
                             break
                     for n in [linkedStart, linkedStart]:
@@ -634,33 +929,33 @@ class EventSetBuilder:
                             break
                     if not assertLegal: break
                 if not assertLegal:
-                    #Cannot have multiple events landing or starting on same space!
+                    # Cannot have multiple events landing or starting on same space!
                     t['candcursor'] += 1
                     continue
 
             if (explicitEvent is None and
                     (self.searchOrderedListForVal(t['eventnodes'], candEventSpecs['eventbase']) > -1 or
-                self.searchOrderedListForVal(t['eventnodes'], candEventSpecs['eventtop']) > -1)) :
-                #Cannot have multiple events landing or starting on same space!
+                     self.searchOrderedListForVal(t['eventnodes'], candEventSpecs['eventtop']) > -1)):
+                # Cannot have multiple events landing or starting on same space!
                 t['candcursor'] += 1
                 continue
 
-            #If hella override, check it
+            # If hella override, check it
             if (explicitEvent is None and
-                    (params.tryGetParam(t['track_id'],'disallowbelowsetlength', optional=True) > 0 and
-                candEventSpecs['length'] < params.tryGetParam(t['track_id'],'disallowbelowsetlength'))):
+                    (params.tryGetParam(t['track_id'], 'disallowbelowsetlength', optional=True) > 0 and
+                     candEventSpecs['length'] < params.tryGetParam(t['track_id'], 'disallowbelowsetlength'))):
                 t['candcursor'] += 1
                 continue
 
-            #Check if ortho ratio is exceeded
+            # Check if ortho ratio is exceeded
             if (explicitEvent is None and
                     (candEventSpecs['event'].isOrtho and len(t['eventsetbuild']) > 0 and
-                len([e for e in t['eventsetbuild'] if e.isOrtho])/len(t['eventsetbuild']) >
-                    params.tryGetParam(t['track_id'],'maxorthoratio'))):
+                     len([e for e in t['eventsetbuild'] if e.isOrtho]) / len(t['eventsetbuild']) >
+                     params.tryGetParam(t['track_id'], 'maxorthoratio'))):
                 t['candcursor'] += 1
                 continue
 
-            #Check for two-hits
+            # Check for two-hits
 
             # boostsIfChute, impedersIfChute, boostsIfLadder, impedersIfLadder = [],[],[],[]
             # curEventLength = candEventSpecs['length']
@@ -696,28 +991,28 @@ class EventSetBuilder:
                 canBeLadder = candEventSpecs['canbeladder']
             else:
                 canBeChute = explicitChute
-                #MIGHT BE TOO DRACONIAN to force??
+                # MIGHT BE TOO DRACONIAN to force??
                 # canBeLadder = candEventSpecs['canbeladder'] and explicitLadder
                 canBeLadder = explicitLadder
 
             canBeLadderOnly, canBeChuteOnly = canBeLadder, canBeChute
-            #Check if can be chute only
-            if explicitEvent is None and (canBeChute and len(ladderBases)/(len(chuteBases) + 1)
-                    < params.tryGetParam(t['track_id'], "minladdertochuteratio")):
+            # Check if can be chute only
+            if explicitEvent is None and (canBeChute and len(ladderBases) / (len(chuteBases) + 1)
+                                          < params.tryGetParam(t['track_id'], "minladdertochuteratio")):
                 canBeChuteOnly = False
                 if not canBeLadder:
                     t['candcursor'] += 1
                     continue
 
-            #Check if can be ladder only
-            if explicitEvent is None and (canBeLadder and len(chuteBases)/(len(ladderBases) + 1)
-                < params.tryGetParam(t['track_id'], "minchutetoladderratio")):
+            # Check if can be ladder only
+            if explicitEvent is None and (canBeLadder and len(chuteBases) / (len(ladderBases) + 1)
+                                          < params.tryGetParam(t['track_id'], "minchutetoladderratio")):
                 canBeLadderOnly = False
                 if not canBeChute:
                     t['candcursor'] += 1
                     continue
 
-            #Insert event score as chute, ladder, and both
+            # Insert event score as chute, ladder, and both
             for instType in (en.InstanceEventType.CHUTEONLY, en.InstanceEventType.LADDERONLY,
                              en.InstanceEventType.CHUTEANDLADDER):
                 effEnergy, effCompModulation = 0, 0
@@ -728,44 +1023,47 @@ class EventSetBuilder:
                         if not canBeChute: continue
                         if not canBeChuteOnly: continue
                         if (explicitEvent is None and not candEventSpecs['event'].isOrtho and
-                            candEventSpecs['event'].crowLength < gp.mincrowvectordistcancel):
+                                candEventSpecs['event'].crowLength < gp.mincrowvectordistcancel):
                             continue
                         if explicitEvent is not None and explicitLadder: continue
                         effEnergy = candEventSpecs['length']
                         # modsForType = allModsIfChute
-                        effLengthForecast = self.runPartialTrackEffLengthHoles(t['track_id'], t['eventsetbuild'], t['tracklength'],
-                                                                               tentNewChute=(candEventSpecs['event'].endHole.num,
-                                                                                             candEventSpecs['event'].startHole.num),
-                                                                               readMode=True)[0]
+                        effLengthForecast = \
+                        self.runPartialTrackEffLengthHoles(t['track_id'], t['eventsetbuild'], t['tracklength'],
+                                                           tentNewChute=(candEventSpecs['event'].endHole.num,
+                                                                         candEventSpecs['event'].startHole.num),
+                                                           readMode=True)[0]
                     case en.InstanceEventType.LADDERONLY:
                         if not canBeLadder: continue
                         if not canBeLadderOnly: continue
                         if (explicitEvent is None and not candEventSpecs['event'].isOrtho and
-                            candEventSpecs['event'].crowLength < gp.mincrowvectordistcancel):
+                                candEventSpecs['event'].crowLength < gp.mincrowvectordistcancel):
                             continue
                         if explicitEvent is not None and explicitChute: continue
                         effEnergy = candEventSpecs['length']
                         # modsForType = allModsIfLadder
-                        effLengthForecast = self.runPartialTrackEffLengthHoles(t['track_id'], t['eventsetbuild'], t['tracklength'],
-                                                                               tentNewLadder=(candEventSpecs['event'].startHole.num,
-                                                                                             candEventSpecs['event'].endHole.num),
-                                                                               readMode=True)[0]
+                        effLengthForecast = \
+                        self.runPartialTrackEffLengthHoles(t['track_id'], t['eventsetbuild'], t['tracklength'],
+                                                           tentNewLadder=(candEventSpecs['event'].startHole.num,
+                                                                          candEventSpecs['event'].endHole.num),
+                                                           readMode=True)[0]
                     case en.InstanceEventType.CHUTEANDLADDER:
                         if not (canBeChute and canBeLadder): continue
-                        effEnergy = 2*candEventSpecs['length']
+                        effEnergy = 2 * candEventSpecs['length']
                         # modsForType = allModsIfChute + allModsIfLadder
-                        effLengthForecast = self.runPartialTrackEffLengthHoles(t['track_id'], t['eventsetbuild'], t['tracklength'],
-                                                                               tentNewLadder=(candEventSpecs['event'].startHole.num,
-                                                                                             candEventSpecs['event'].endHole.num),
-                                                                               tentNewChute=(candEventSpecs['event'].endHole.num,
-                                                                                             candEventSpecs['event'].startHole.num),
-                                                                               readMode=True)[0]
+                        effLengthForecast = \
+                        self.runPartialTrackEffLengthHoles(t['track_id'], t['eventsetbuild'], t['tracklength'],
+                                                           tentNewLadder=(candEventSpecs['event'].startHole.num,
+                                                                          candEventSpecs['event'].endHole.num),
+                                                           tentNewChute=(candEventSpecs['event'].endHole.num,
+                                                                         candEventSpecs['event'].startHole.num),
+                                                           readMode=True)[0]
 
                 # Infinite looping observed!!  Not a good set
                 if effLengthForecast >= 9999999: continue
                 # Adjust length as per control length
-                effLengthForecast *= t['tracklength']/t['controllength']
-                #NOTE: impeders are (-), boosters are (+)
+                effLengthForecast *= t['tracklength'] / t['controllength']
+                # NOTE: impeders are (-), boosters are (+)
                 effCompModulation = effLengthForecast - t['curestefflength']
                 # print(str(effCompModulation))
 
@@ -774,7 +1072,7 @@ class EventSetBuilder:
                 #     #Any two-hits increase nrg, no matter up or down
                 #     effEnergyModulation += sum([m['scaledenergymod'] for m in modsForType])
 
-                #BASE SCORE ON BLEND MOD + ENERGY
+                # BASE SCORE ON BLEND MOD + ENERGY
 
                 # NOTE: longer balanceandefflengthcontrolfactor for longer route
                 balFactor = params.tryGetParam(t['track_id'], 'balanceandefflengthcontrolfactor')
@@ -787,7 +1085,7 @@ class EventSetBuilder:
                 # Too much instability!  Nix this uber event
                 if instEstLengthDisp > gp.maxefflengthdisp: continue
 
-                curScore = 1.0 #Base amt
+                curScore = 1.0  # Base amt
                 if curEstLengthDiscr != 0:
                     # If board is perfect, leave it alone!  Highly unlikely tho except for inital run
                     balScoreMod = abs(instEstLengthDiscr) / abs(curEstLengthDiscr)
@@ -810,7 +1108,6 @@ class EventSetBuilder:
                             # curScore = balScoreMod*gp.gamelengthtightness
                             curScore = balScoreMod * math.pow((1.0 + lengtheningControl), gp.gamelengthtightness)
 
-
                 # compBufDiv = abs(t['compensationbuffer'])
                 # if compBufDiv == 0: compBufDiv = 1
                 # if abs(t['compensationbuffer'] + effCompModulation) < abs(t['compensationbuffer']):
@@ -823,7 +1120,8 @@ class EventSetBuilder:
                 #     sdfsd=""
                 if abs(effEnergy) + abs(t['energybuffer']) > 0:
                     curScore *= (1.0 + (params.tryGetParam(t['track_id'], 'energybufferenforcement')
-                                        *abs(effEnergy - t['energybuffer'])/(abs(effEnergy) + abs(t['energybuffer']))))
+                                        * abs(effEnergy - t['energybuffer']) / (
+                                                    abs(effEnergy) + abs(t['energybuffer']))))
                 effNetEnergy = effEnergy + abs(effCompModulation)
 
                 # #NOTE: longer balanceandefflengthcontrolfactor for longer route
@@ -873,9 +1171,10 @@ class EventSetBuilder:
                 #     return 0
 
                 if instType in (en.InstanceEventType.LADDERONLY, en.InstanceEventType.CHUTEANDLADDER):
-                    for p in (1, 2 ,4):
+                    for p in (1, 2, 4):
                         if self.searchOrderedListForVal(ladderBases, candEventSpecs['event'].endHole.num + p) > -1:
-                            if abs(p) == 4: numTwoHitsLoose += 1
+                            if abs(p) == 4:
+                                numTwoHitsLoose += 1
                             else:
                                 numTwoHits += 1
                                 for l in ladders:
@@ -883,7 +1182,8 @@ class EventSetBuilder:
                                         twoHitNetLengths.append(l['length'] + candEventSpecs['event'].length)
                                         break
                         if self.searchOrderedListForVal(chuteTops, candEventSpecs['event'].endHole.num + p) > -1:
-                            if abs(p) == 4: numTwoHitsLoose += 1
+                            if abs(p) == 4:
+                                numTwoHitsLoose += 1
                             else:
                                 if gp.onlysamedirtwohits:
                                     twoHitInvalid = True
@@ -897,9 +1197,10 @@ class EventSetBuilder:
                                         twoHitNetLengths.append(candEventSpecs['event'].length - c['length'])
                                         break
                     if twoHitInvalid: continue
-                    for p in (-1, -2 ,-4):
+                    for p in (-1, -2, -4):
                         if self.searchOrderedListForVal(ladderTops, candEventSpecs['event'].startHole.num + p) > -1:
-                            if abs(p) == 4: numTwoHitsLoose += 1
+                            if abs(p) == 4:
+                                numTwoHitsLoose += 1
                             else:
                                 numTwoHits += 1
                                 for l in ladders:
@@ -907,7 +1208,8 @@ class EventSetBuilder:
                                         twoHitNetLengths.append(candEventSpecs['event'].length + l['length'])
                                         break
                         if self.searchOrderedListForVal(chuteBases, candEventSpecs['event'].startHole.num + p) > -1:
-                            if abs(p) == 4: numTwoHitsLoose += 1
+                            if abs(p) == 4:
+                                numTwoHitsLoose += 1
                             else:
                                 if gp.onlysamedirtwohits:
                                     twoHitInvalid = True
@@ -925,7 +1227,8 @@ class EventSetBuilder:
                 if instType in (en.InstanceEventType.CHUTEONLY, en.InstanceEventType.CHUTEANDLADDER):
                     for p in (1, 2, 4):
                         if self.searchOrderedListForVal(ladderBases, candEventSpecs['event'].startHole.num + p) > -1:
-                            if abs(p) == 4: numTwoHitsLoose += 1
+                            if abs(p) == 4:
+                                numTwoHitsLoose += 1
                             else:
                                 if gp.onlysamedirtwohits:
                                     twoHitInvalid = True
@@ -939,18 +1242,20 @@ class EventSetBuilder:
                                         twoHitNetLengths.append(l['length'] - candEventSpecs['event'].length)
                                         break
                         if self.searchOrderedListForVal(chuteTops, candEventSpecs['event'].startHole.num + p) > -1:
-                            if abs(p) == 4: numTwoHitsLoose += 1
+                            if abs(p) == 4:
+                                numTwoHitsLoose += 1
                             else:
                                 numTwoHits += 1
                                 for c in chutes:
                                     if c['chutetop'] == candEventSpecs['event'].startHole.num + p:
-                                        twoHitNetLengths.append((-1)*c['length'] - candEventSpecs['event'].length)
+                                        twoHitNetLengths.append((-1) * c['length'] - candEventSpecs['event'].length)
                                         break
                     if twoHitInvalid: continue
 
                     for p in (-1, -2, -4):
                         if self.searchOrderedListForVal(ladderTops, candEventSpecs['event'].endHole.num + p) > -1:
-                            if abs(p) == 4: numTwoHitsLoose += 1
+                            if abs(p) == 4:
+                                numTwoHitsLoose += 1
                             else:
                                 if gp.onlysamedirtwohits:
                                     twoHitInvalid = True
@@ -964,29 +1269,29 @@ class EventSetBuilder:
                                         twoHitNetLengths.append(l['length'] - candEventSpecs['event'].length)
                                         break
                         if self.searchOrderedListForVal(chuteBases, candEventSpecs['event'].endHole.num + p) > -1:
-                            if abs(p) == 4: numTwoHitsLoose += 1
+                            if abs(p) == 4:
+                                numTwoHitsLoose += 1
                             else:
                                 numTwoHits += 1
                                 for c in chutes:
                                     if c['chutebase'] == candEventSpecs['event'].endHole.num + p:
-                                        twoHitNetLengths.append((-1)*c['length'] - candEventSpecs['event'].length)
+                                        twoHitNetLengths.append((-1) * c['length'] - candEventSpecs['event'].length)
                                         break
                     if twoHitInvalid: continue
 
-                if len(twoHitNetLengths) > 0 and (min(twoHitNetLengths) < (-1)*gp.maxtwohitnetgainloss or
+                if len(twoHitNetLengths) > 0 and (min(twoHitNetLengths) < (-1) * gp.maxtwohitnetgainloss or
                                                   max(twoHitNetLengths) > gp.maxtwohitnetgainloss):
                     continue
 
-                if (numTwoHits > 0 and numTwoHits*params.tryGetParam(t['track_id'], 'twohitfreqimpedance') >
+                if (numTwoHits > 0 and numTwoHits * params.tryGetParam(t['track_id'], 'twohitfreqimpedance') >
                         (gp.allowabletwohits - t['twohitsthusfar'])):
                     continue
 
-                curScore *= (1.0 + (numTwoHits + numTwoHitsLoose/2)*t['twohitsthusfar']*
+                curScore *= (1.0 + (numTwoHits + numTwoHitsLoose / 2) * t['twohitsthusfar'] *
                              params.tryGetParam(t['track_id'], 'twohitfreqimpedance'))
 
-
-                #Adjust score based on direction of effCompModulation (trying to get to 0)
-                #Again, boosters are (+) and vice versa, so we attempt negation
+                # Adjust score based on direction of effCompModulation (trying to get to 0)
+                # Again, boosters are (+) and vice versa, so we attempt negation
                 tempp = False
                 # if effCompModulation != 0:
                 #     # print("Score b4 comp, hist & cancel mods: {}".format(curScore))
@@ -1004,72 +1309,72 @@ class EventSetBuilder:
                 #         #Punish
                 #         curScore /= effControlFactor
 
-
                 # #Boost score for each allowable 2-hit, factoring in two-hit impedance
                 # for m in modsForType:
                 #     curScore = math.sqrt(curScore)*(1.0 + twohitimpedanceeffector)
 
-                #Impede score if too many ladders/chutes are getting cancelled
+                # Impede score if too many ladders/chutes are getting cancelled
                 if instType != en.InstanceEventType.CHUTEANDLADDER and t['cancels'] >= gp.whenstartworryingaboutcancels:
-                    if t['cancels'] >= 2.5*gp.whenstartworryingaboutcancels: continue
-                    curScore *= (1.0 + params.tryGetParam(t['track_id'],'cancelimpedance')*(t['cancels'] + 1)
-                                 /(t['eventscount'] + 1))
+                    if t['cancels'] >= 2.5 * gp.whenstartworryingaboutcancels: continue
+                    curScore *= (1.0 + params.tryGetParam(t['track_id'], 'cancelimpedance') * (t['cancels'] + 1)
+                                 / (t['eventscount'] + 1))
 
-                #Preferentially weight based on proximity to end of track
+                # Preferentially weight based on proximity to end of track
                 endTrackWeight = params.tryGetParam(t['track_id'], 'eventstowardsendoftrackreward')
-                eventPosRelMidpoints = candEventSpecs['event'].midPointNum/t['tracklength'] - 0.5
+                eventPosRelMidpoints = candEventSpecs['event'].midPointNum / t['tracklength'] - 0.5
                 if eventPosRelMidpoints < 0:
-                    curScore *= (1.0 + abs(eventPosRelMidpoints)*endTrackWeight)
+                    curScore *= (1.0 + abs(eventPosRelMidpoints) * endTrackWeight)
                 else:
-                    curScore /= (1.0 + abs(eventPosRelMidpoints)*endTrackWeight)
+                    curScore /= (1.0 + abs(eventPosRelMidpoints) * endTrackWeight)
 
-                #Factor in distribution of length histogram to help ensure distributed lengths
-                #Try to curve fit specified ideal histo
-                #NOTE: golf-stylee, lower score is better
+                # Factor in distribution of length histogram to help ensure distributed lengths
+                # Try to curve fit specified ideal histo
+                # NOTE: golf-stylee, lower score is better
                 curLenPerc = 0.0
                 curLength = candEventSpecs['length']
                 if sum([h[1] for h in self.allTentLengthHisto]) > 0:
                     curLenPerc = (self.allTentLengthHisto[curLength - 1][1] /
-                                                     sum([h[1] for h in self.allTentLengthHisto]))
+                                  sum([h[1] for h in self.allTentLengthHisto]))
                 idealPerc = t['lengthdistidealcurve'][curLength - 1][1]
                 lenDistDisp = curLenPerc - idealPerc
                 if lenDistDisp < 0:
-                    #Need more!
-                    curScore /= (1.0 + abs(lenDistDisp))*params.tryGetParam(t['track_id'],'lengthhistogramscoringfactor')
+                    # Need more!
+                    curScore /= (1.0 + abs(lenDistDisp)) * params.tryGetParam(t['track_id'],
+                                                                              'lengthhistogramscoringfactor')
                 elif lenDistDisp > 0:
-                    #Too many of this length already, downshift
-                    curScore *= (1.0 + abs(lenDistDisp))*params.tryGetParam(t['track_id'],'lengthhistogramscoringfactor')
+                    # Too many of this length already, downshift
+                    curScore *= (1.0 + abs(lenDistDisp)) * params.tryGetParam(t['track_id'],
+                                                                              'lengthhistogramscoringfactor')
 
-                #Factor in distribution of length over time
-                #TEMP!!
+                # Factor in distribution of length over time
+                # TEMP!!
                 if len(t['lengthovertimeideal']) < hole.num:
                     print("FAILED LENGTH OVER TIME TEST: hole.num {}".format(hole.num))
                 else:
-                    idealLengthForHole = t['lengthovertimeideal'][hole.num-1][1]
-                    scoreMod = (1.0 + (abs(curLength - idealLengthForHole)/t['maxlength']) *
-                    params.tryGetParam(t['track_id'],'lengthovertimescoringfactor'))
+                    idealLengthForHole = t['lengthovertimeideal'][hole.num - 1][1]
+                    scoreMod = (1.0 + (abs(curLength - idealLengthForHole) / t['maxlength']) *
+                                params.tryGetParam(t['track_id'], 'lengthovertimescoringfactor'))
                     if curScore >= 0:
                         curScore *= scoreMod
                     else:
                         curScore /= scoreMod
 
-                #Aggr into avg score
+                # Aggr into avg score
                 self.avgScoreSum += curScore
                 self.avgScoreDiv += 1
-                self.avgScore = self.avgScoreSum/self.avgScoreDiv
+                self.avgScore = self.avgScoreSum / self.avgScoreDiv
 
-                #Elminate options based on shortening & lengthening control
+                # Elminate options based on shortening & lengthening control
                 if (curEstLengthDiscr > 0 and shorteningControl > 0.5 and curScore > self.avgScore
-                        *gp.goodscorecutoffperc*2 * (
-                        1.0 - (2 * (shorteningControl - 0.5)))):
+                        * gp.goodscorecutoffperc * 2 * (
+                                1.0 - (2 * (shorteningControl - 0.5)))):
                     t['numnogos'] += 1
                     continue
                 elif (curEstLengthDiscr < 0 and lengtheningControl > 0.5 and curScore > self.avgScore
-                      *gp.goodscorecutoffperc*2 * (
-                        1.0 - (2 * (lengtheningControl - 0.5)))):
+                      * gp.goodscorecutoffperc * 2 * (
+                              1.0 - (2 * (lengtheningControl - 0.5)))):
                     t['numnogos'] += 1
                     continue
-
 
                 # if sum([h[1] for h in self.allTentLengthHisto]) > 0:
                 #     curLenPerc = (self.allTentLengthHisto[candEventSpecs['length'] - 1][1] /
@@ -1077,21 +1382,22 @@ class EventSetBuilder:
                 #     avgPerc = (1.0 / len([h for h in self.allTentLengthHisto if h[1] > 0]))
                 #     curScore *= (1.0 + (curLenPerc-avgPerc)*params.tryGetParam(t['track_id'],'lengthhistogramscoringfactor)
 
-                #Add event score to output list
+                # Add event score to output list
                 # if tempp: print("Score after hist & cancel mods: {}".format(curScore))
                 # print("{} {}".format(instType, curScore))
                 # print(curScore)
                 eventFitnesses.append(dict(event=candEventSpecs['event'],
                                            eventspecs=candEventSpecs,
-                                           score=curScore, effnetenergy=effNetEnergy, effcompmodulation=effCompModulation,
+                                           score=curScore, effnetenergy=effNetEnergy,
+                                           effcompmodulation=effCompModulation,
                                            insttype=instType,
                                            instchute=instType in (en.InstanceEventType.CHUTEANDLADDER,
                                                                   en.InstanceEventType.CHUTEONLY),
                                            instladder=instType in (en.InstanceEventType.CHUTEANDLADDER,
-                                                                  en.InstanceEventType.LADDERONLY),
+                                                                   en.InstanceEventType.LADDERONLY),
                                            lasteventtop=0
-                                            ,
-                                            twohits = numTwoHits, estefflength=effLengthForecast
+                                           ,
+                                           twohits=numTwoHits, estefflength=effLengthForecast
                                            ))
 
             t['candcursor'] += 1
@@ -1099,18 +1405,40 @@ class EventSetBuilder:
         eventFitnesses.sort(key=lambda f: f['score'])
         end_time = time.time()
         self.scoringTime += end_time - start_time
-        if ((len(eventFitnesses) > 0 and eventFitnesses[0]['score'] <= self.avgScore*gp.goodscorecutoffperc*2)
-                or explicitEvent is not None) :
+        if ((len(eventFitnesses) > 0 and eventFitnesses[0]['score'] <= self.avgScore * gp.goodscorecutoffperc * 2)
+                or explicitEvent is not None):
             return eventFitnesses
         if len(eventFitnesses) > 0: t['numdenies'] += 1
         return None
 
     def searchOrderedListForVal(self, orderedList, val):
+        """
+        Search for a value in a sorted list using binary search.
+        
+        Args:
+            orderedList: Sorted list to search in.
+            val: Value to search for.
+            
+        Returns:
+            Index of the value if found, -1 otherwise.
+        """
         idx = bsc.bisect_left(orderedList, val)
         if idx < len(orderedList) and orderedList[idx] == val: return idx
         return -1
 
     def testInterceptLegality(self, curEvent, allVectorsTest, baseVectorsTest, t):
+        """
+        Test if an event's vector intercepts with existing vectors.
+        
+        Args:
+            curEvent: The event to test.
+            allVectorsTest: Set of all vectors to test against.
+            baseVectorsTest: Base vectors to test against.
+            t: Track information.
+            
+        Returns:
+            Tuple of (is_legal, result_dict) where is_legal indicates if the intercept is allowed.
+        """
         if not curEvent.isOrtho:
             if self.possibleEvents.check_intersections({curEvent.crowVector}, allVectorsTest, postGenTest=True):
                 return False, dict(incr=-1, rev=False)
@@ -1125,7 +1453,7 @@ class EventSetBuilder:
                 runs.append(dict(rev=True, minincr=curEvent.orthoRevMinIncr, maxincr=curEvent.orthoRevMaxIncr))
 
             if len(allVectorsTest) == 150:
-                sfds=""
+                sfds = ""
             for run in runs:
                 ortho = self.possibleEvents.orthogonal_vector(curEvent.startHole.coords, curEvent.endHole.coords,
                                                               gp.maxloopyorthoeventdisplacementincrements
@@ -1140,7 +1468,7 @@ class EventSetBuilder:
             if bestIncr == 999 or bestIncr == 0:
                 return False, dict(incr=-1, rev=False)
             else:
-                #TEMPP
+                # TEMPP
                 if len(runs) == 1 or runs[0]['rev'] == revOrtho:
                     run = runs[0]
                 else:
@@ -1151,30 +1479,53 @@ class EventSetBuilder:
                 self.possibleEvents.test_sidestep_events(
                     curEvent.startHole, curEvent.endHole, t['track'].trackholes, t['holecoords'],
                     ortho, gp.maxloopyorthoeventdisplacementincrements * gp.eventminspacing, gp.eventminspacing,
-                    allVectorsTest, revOrtho, minIncr=run['minincr'], maxIncr=run['maxincr'], ignoreProximity=True, debugTest=True)
+                    allVectorsTest, revOrtho, minIncr=run['minincr'], maxIncr=run['maxincr'], ignoreProximity=True,
+                    debugTest=True)
                 return True, dict(incr=bestIncr, rev=revOrtho)
 
     def tryGetEventForHole(self, hole, t, interceptsTestVectors, baseVectorsTest, params, trackEventsOverview):
-        # Walk through path, assigning events as per energy buffer
-        #Det energy buildup
+        """
+        Attempts to find and return the most suitable event for a given hole on a track.
+        
+        This method evaluates potential events for a specific hole based on various factors including
+        energy buffer levels, event spacing, and distribution patterns. It ensures that events are
+        placed in a way that maintains game balance and follows design constraints.
+        
+        Args:
+            hole: The hole object to find an event for.
+            t: Dictionary containing track-specific data including energy buffer and event candidates.
+            interceptsTestVectors: Set of vectors to test for intercepts with potential events.
+            baseVectorsTest: Set of base vectors used for intercept testing.
+            params: Parameter set containing configuration values for event selection.
+            trackEventsOverview: Overview of all track events for reference and scoring.
+            
+        Returns:
+            dict: A dictionary containing the selected event and its fitness score, or None if no
+                  suitable event is found. The dictionary includes:
+                  - 'event': The selected event object
+                  - 'score': The fitness score of the event
+                  - 'lasteventtop': The position of the last event's top
+                  - Other event-specific metadata
+        """
         while (t['energybufferidx'] < len(t['trackenergycurve']) and
                t['trackenergycurve'][t['energybufferidx']][0] < hole.num):
             t['energybuffer'] += t['trackenergycurve'][t['energybufferidx']][1]
             t['energybufferidx'] += 1
-        if t['energybuffer'] < t['candavgenergy'] / params.tryGetParam(t['track_id'],'candenergybufferdivider'): return None
+        if t['energybuffer'] < t['candavgenergy'] / params.tryGetParam(t['track_id'],
+                                                                       'candenergybufferdivider'): return None
 
-        #Cursor to start of trackhole in event list
+        # Cursor to start of trackhole in event list
         while (t['candcursor'] < len(t['candeventspecs'])
                and t['candeventspecs'][t['candcursor']]['eventtop'] < hole.num):
             t['candcursor'] += 1
         if (t['candcursor'] >= len(t['candeventspecs']) or
                 t['candeventspecs'][t['candcursor']]['eventtop'] != hole.num): return None
 
-        #Omit every 8th or so, feathering to avoid getting stuck in optimizer endless loops
-        if rd.randint(1,gp.randomfeatheringamount) == 1: return None
+        # Omit every 8th or so, feathering to avoid getting stuck in optimizer endless loops
+        if rd.randint(1, gp.randomfeatheringamount) == 1: return None
 
-        #Skip if need to enforce min spacing to flesh out track
-        if t['minspacectr'] < params.tryGetParam(t['track_id'],'enforceminspacing'): return None
+        # Skip if need to enforce min spacing to flesh out track
+        if t['minspacectr'] < params.tryGetParam(t['track_id'], 'enforceminspacing'): return None
 
         # Factor in distribution of spacing histogram to help ensure even distribution of spacings
         prevNode = 0
@@ -1185,7 +1536,7 @@ class EventSetBuilder:
         spacing = hole.num - prevNode
         if spacing > len(t['spacinghisto']):
             for i in range(len(t['spacinghisto']) - 1, spacing):
-                #Add in further spacing histos
+                # Add in further spacing histos
                 t['spacinghisto'].append([i + 1, 0])
 
         if sum([h[1] for h in t['spacinghisto']]) > 0:
@@ -1194,34 +1545,48 @@ class EventSetBuilder:
             # NOTE: for spacing we use all spacings for avg even unpopulated one
             # This is in order to factor in specified ideal deviation
             avgPerc = 1.0 / len(t['spacinghisto'])
-            if curSpcPerc - avgPerc > params.tryGetParam(t['track_id'],'eventspacinghistogramscoringfactor'): return None
+            if curSpcPerc - avgPerc > params.tryGetParam(t['track_id'],
+                                                         'eventspacinghistogramscoringfactor'): return None
 
-        #Determine viable event fitnesses
+        # Determine viable event fitnesses
         eventFitnesses = self.scoreEventsForHole(t, hole, t['chutes'], t['chutebases'], t['chutetops'],
-                                                        t['ladders'], t['ladderbases'], t['laddertops'], params,
+                                                 t['ladders'], t['ladderbases'], t['laddertops'], params,
                                                  trackEventsOverview)
 
-        #Find fittest event
+        # Find fittest event
         if eventFitnesses is not None and len(eventFitnesses) > 0:
             for fitness in eventFitnesses:
-                legal, orthoInst = self.testInterceptLegality(fitness['event'], interceptsTestVectors,baseVectorsTest, t)
+                legal, orthoInst = self.testInterceptLegality(fitness['event'], interceptsTestVectors, baseVectorsTest,
+                                                              t)
                 if legal:
                     if orthoInst['incr'] > -1:
                         fitness['event'].instanceIncr = orthoInst['incr']
                         fitness['event'].instanceRev = orthoInst['rev']
                     fitness['lasteventtop'] = prevNode
-                    #Score cutoff
+                    # Score cutoff
                     # if fitness['score'] < t['chosenscorecutoff']:
                     return fitness
                     # else: return None
 
         return None
 
-
-
     def indexStartOfEachHoleInCands(self, holes, trackEventOverview):
+        """
+        Creates a lookup table mapping hole numbers to their starting indices in the candidate events list.
+        
+        This method builds an index that allows for efficient lookup of where events for each hole
+        begin in the candidate events list, which is used to speed up event selection during board generation.
+        
+        Args:
+            holes: List of hole objects on the track.
+            trackEventOverview: List of all candidate events for the track, sorted by hole number.
+            
+        Note:
+            Modifies the trackEventOverview dictionary in-place to add a 'candeventstartlookup' key
+            containing the index mapping.
+        """
         candEventCursor = 0
-        candEventCursorStartLookups = [-1]*len(holes)
+        candEventCursorStartLookups = [-1] * len(holes)
 
         for h in holes:
             while trackEventOverview[candEventCursor]['eventtop'] < h.num:
@@ -1230,12 +1595,31 @@ class EventSetBuilder:
             if candEventCursor >= len(trackEventOverview): break
 
             if trackEventOverview[candEventCursor]['eventtop'] == h.num:
-                candEventCursorStartLookups[h.num-1] = candEventCursor
+                candEventCursorStartLookups[h.num - 1] = candEventCursor
 
         trackEventOverview['candeventstartlookup'] = candEventCursorStartLookups
 
     def updateVectorsTest(self, allVectorsTest, baseVectorsTest, event, removal, isOrtho):
+        """
+        Updates the test vectors used for collision detection when placing events.
+        
+        This method maintains sets of vectors that represent occupied spaces on the board to prevent
+        overlapping or conflicting event placements. It handles both orthogonal and non-orthogonal events,
+        and can add or remove vectors from the test sets.
+        
+        Args:
+            allVectorsTest: Set of all vectors currently occupied by events.
+            baseVectorsTest: Set of base vectors used for collision detection.
+            event: The event being added or removed.
+            removal: Boolean indicating whether to remove the event's vectors (True) or add them (False).
+            isOrtho: Boolean indicating if the event is orthogonal.
+            
+        Note:
+            For non-orthogonal events, this also handles the creation of 'lump' markers that indicate
+            restricted areas around chutes and ladders.
+        """
         if len(allVectorsTest) == 150:
+            # Debug breakpoint condition
             sfsd = ""
         if not removal:
             if not isOrtho:
@@ -1243,25 +1627,25 @@ class EventSetBuilder:
                     set(tuple(
                         [v for v in self.boundingBoxPlusVector(event.crowVector)])))
 
-                #Add lumps 20% of the way along so ppl know cant go that way
+                # Add lumps 20% of the way along so ppl know cant go that way
                 if event.instanceIsChute != event.instanceIsLadder:
                     start, end = np.array(event.crowVector[0]), np.array(event.crowVector[1])
                     dist = self.possibleEvents.calculate_distance(event.crowVector[0], event.crowVector[1])
                     if event.instanceIsChute:
-                        event.instanceLump = (start + (end - start)*((3/dist) + math.pow(dist, 0.25)/50)).tolist()
+                        event.instanceLump = (start + (end - start) * ((3 / dist) + math.pow(dist, 0.25) / 50)).tolist()
                     else:
-                        event.instanceLump = (end + (start - end)*((3/dist) + math.pow(dist, 0.25)/50)).tolist()
+                        event.instanceLump = (end + (start - end) * ((3 / dist) + math.pow(dist, 0.25) / 50)).tolist()
 
                 baseVectorsTest.add(event.crowVector)
             else:
                 event.instanceStartVector = OrthoLineTrace(self.possibleEvents, event, event.instanceIncr,
                                                            event.instanceRev,
-                                                               en.OrthoLineTraceType.START).vector
+                                                           en.OrthoLineTraceType.START).vector
                 event.instanceEndVector = OrthoLineTrace(self.possibleEvents, event, event.instanceIncr,
-                                                             event.instanceRev,
-                                                             en.OrthoLineTraceType.END).vector
+                                                         event.instanceRev,
+                                                         en.OrthoLineTraceType.END).vector
 
-                #Add lumps 20% of the way along so ppl know cant go that way
+                # Add lumps 20% of the way along so ppl know cant go that way
                 if event.instanceIsChute != event.instanceIsLadder:
                     vector = event.instanceStartVector if event.instanceIsChute else event.instanceEndVector
                     start, end = np.array(vector[0]), np.array(vector[1])
@@ -1294,87 +1678,121 @@ class EventSetBuilder:
                 baseVectorsTest.discard(event.instanceEndVector)
 
     def recalcTrackCompletionPcts(self, trackEventsOverview):
+        """
+        Recalculates completion percentages and stall status for all tracks.
+        
+        This method updates the completion statistics for each track, including:
+        - Whether the track is stalled (no progress made in recent iterations)
+        - The percentage of holes processed
+        - The percentage of target events placed
+        
+        Args:
+            trackEventsOverview: List of dictionaries containing track event data.
+            
+        Returns:
+            tuple: A tuple containing:
+                - Average hole completion percentage across all viable tracks
+                - Average chute completion percentage across all viable tracks
+        """
         for t in trackEventsOverview:
             t['trackisstalled'] = t['trackstalledcounter'] > gp.maxitertrackstalled
             t['holescompletepct'] = t['curhole'] / len(t['track'].trackholes)
-            t['chutescompletepct'] = len(t['eventsetbuild'])/t['optevents']
+            t['chutescompletepct'] = len(t['eventsetbuild']) / t['optevents']
         viableTracks = [e for e in trackEventsOverview if not e['trackisstalled']]
 
         avgHolePct = sum([t['holescompletepct'] for t in viableTracks]) / len(viableTracks)
-        avgChutesPct = sum([t['chutescompletepct'] for t in viableTracks])/len(viableTracks)
+        avgChutesPct = sum([t['chutescompletepct'] for t in viableTracks]) / len(viableTracks)
         return avgHolePct, avgChutesPct
 
     def tryEventSet(self, params, prevEffLengths):
         """
-        Intiial flying blind set, no specs known
+        Attempts to generate a complete set of events for all tracks based on the given parameters.
+        
+        This is the main method that coordinates the event generation process across all tracks.
+        It handles the core logic of placing events while respecting constraints and maintaining
+        game balance.
+        
+        Args:
+            params: Parameter set containing configuration values for event generation.
+            prevEffLengths: List of effective lengths from previous generation attempts.
+            
+        Returns:
+            bool: True if a valid event set was generated, False otherwise.
+            
+        Note:
+            This method modifies the board state in-place by adding events to tracks.
+            If generation fails, it may adjust parameters and retry automatically.
         """
 
         start_time = time.time()
         self.board.clearTrackEvents(specificTracks=[t for t in self.board.tracks if not t.instLocked])
-        trackEventsOverview = [dict(track=t, trackidx = t.num-1, tracknum=t.num, optevents=0, track_id=t.Track_ID,
+        trackEventsOverview = [dict(track=t, trackidx=t.num - 1, tracknum=t.num, optevents=0, track_id=t.Track_ID,
                                     optfirstchute=0, trackfilled=False, tracklength=len(t.trackholes),
-                                    lengthdeviation=(len(t.trackholes)-gp.effectiveboardlength )/gp.effectiveboardlength,
-                                    spacinghisto=[], minspacectr=0, #chosenscorecutoff=100,
+                                    lengthdeviation=(
+                                                                len(t.trackholes) - gp.effectiveboardlength) / gp.effectiveboardlength,
+                                    spacinghisto=[], minspacectr=0,  # chosenscorecutoff=100,
                                     eventsetbuild=t.eventSetBuild, candeventspecs=[],
                                     lengthdistidealcurve=[], lengthdistactualhist=[],
                                     lengthovertimeideal=[], maxlength=0,
                                     trackenergycurve=[], trackenergyintegral=[],
-                                    candavgenergy=0.0, energybuffer=0.0, energybufferidx = 0, candeventstartlookup=[],
+                                    candavgenergy=0.0, energybuffer=0.0, energybufferidx=0, candeventstartlookup=[],
                                     candcursor=0, chutecursor=0, holecoords=[h.coords for h in t.trackholes],
-                                    lasteventtop = 0, previsladder=False, chutebases = [], chutetops = [],
+                                    lasteventtop=0, previsladder=False, chutebases=[], chutetops=[],
                                     ladders=[], chutes=[],
-                                    eventnodes=[],twohitsthusfar=0,cancels=0,eventscount=0,
-                                    ladderbases=[], laddertops=[], holescompletepct=0.0, chutescompletepct=0.0, curhole=0,
-                                    compensationbuffer = 0.0, trackstalledcounter=0, trackisstalled=False,
-                                    multistack=[], controllength = 0, curestefflength=len(t.trackholes),
-                                    nomultis = False,
+                                    eventnodes=[], twohitsthusfar=0, cancels=0, eventscount=0,
+                                    ladderbases=[], laddertops=[], holescompletepct=0.0, chutescompletepct=0.0,
+                                    curhole=0,
+                                    compensationbuffer=0.0, trackstalledcounter=0, trackisstalled=False,
+                                    multistack=[], controllength=0, curestefflength=len(t.trackholes),
+                                    nomultis=False,
                                     numdenies=0, numnogos=0)
-                          for t in self.board.tracks if not t.instLocked]
+                               for t in self.board.tracks if not t.instLocked]
 
-        #Lock out multis if one or more tracks are locked
+        # Lock out multis if one or more tracks are locked
         if len(trackEventsOverview) != len(self.board.tracks):
             for t in trackEventsOverview: t['nomultis'] = True
 
-        #Retrieve & normalize energy curve and det integral
+        # Retrieve & normalize energy curve and det integral
         energyCurve, energyNormIntegral = self.getEnergyCurve()
 
-        #Retrieve & normalize length dist hist curve
+        # Retrieve & normalize length dist hist curve
         normLengthHistDist = self.getNormLengthDistCurve()
 
-        #Retrieve & normalize length dist over time curve
+        # Retrieve & normalize length dist over time curve
         normLengthOverTimeDist = self.getNormLengthOverTimeCurve()
 
-        #Compute overall figures & charts
+        # Compute overall figures & charts
         allCands = [c for c in [t['track'].candidateEvents.candidateEvents for t in trackEventsOverview] for c in c]
         self.allTentLengthHisto = []
-        for i in range(0,max([c.length for c in allCands])):
+        for i in range(0, max([c.length for c in allCands])):
             self.allTentLengthHisto.append([i + 1, 0])
 
         allCandsEnergyPotentialBuilder = 0.0
         for i in range(0, len(trackEventsOverview)):
             allCandsEnergyPotentialBuilder += sum([c.length * (
-                2 if (True if c.startHole.num < params.tryGetParam(trackEventsOverview[i]['track_id'],'ladderscanstartat')
+                2 if (True if c.startHole.num < params.tryGetParam(trackEventsOverview[i]['track_id'],
+                                                                   'ladderscanstartat')
                       else c.canBeLadder) else 1)
-                 for c in trackEventsOverview[i]['track'].candidateEvents.candidateEvents])
-        avgOverallCandEnergyPotential = allCandsEnergyPotentialBuilder/len(allCands)
+                                                   for c in
+                                                   trackEventsOverview[i]['track'].candidateEvents.candidateEvents])
+        avgOverallCandEnergyPotential = allCandsEnergyPotentialBuilder / len(allCands)
 
-
-        #Iterate over tracks, create event when energy buildup exceeds req
+        # Iterate over tracks, create event when energy buildup exceeds req
 
         for t in trackEventsOverview:
-            #Determine control lengths with blank track
+            # Determine control lengths with blank track
             t['controllength'] = self.runPartialTrackEffLengthHoles(t['track_id'], [],
-                                                                                t['tracklength'],
-                                                                                     readMode=True)[0]
-            if t['controllength']  == 9999999:
+                                                                    t['tracklength'],
+                                                                    readMode=True)[0]
+            if t['controllength'] == 9999999:
                 raise Exception("Failed initial control length")
-                sdfsd=""
+                sdfsd = ""
 
             # Create track-specific energy curve
             candEventSpecs = [dict(event=c, isshared=c.isShared, eventtop=c.endHole.num, eventbase=c.startHole.num,
                                    length=c.length,
                                    canbeladder=False if c.startHole.num <
-                                                        params.tryGetParam(t['track_id'],'ladderscanstartat')
+                                                        params.tryGetParam(t['track_id'], 'ladderscanstartat')
                                    else c.canBeLadder)
                               for c in t['track'].candidateEvents.candidateEvents]
             candEventSpecs.sort(key=lambda c: (c['eventtop'], c['length']))
@@ -1386,78 +1804,80 @@ class EventSetBuilder:
             candAvgEnergy = candEnergyPotential / len(candEventSpecs)
             t['candavgenergy'] = candAvgEnergy
 
-            #If the avg cand nrg is more than global avg, fewer events & vice versa
-            candEnergySkew = ((candAvgEnergy-avgOverallCandEnergyPotential)/
-                              (avgOverallCandEnergyPotential*params.tryGetParam(t['track_id'],'candenergyskewdiminisher')))
-            t['optevents'] = int(params.tryGetParam(t['track_id'],'baseopteventspertrack')*(1.0-candEnergySkew))
-            t['optfirstchute'] = int(params.tryGetParam(t['track_id'],'baseoptfirstchute')*(1.0+candEnergySkew))
+            # If the avg cand nrg is more than global avg, fewer events & vice versa
+            candEnergySkew = ((candAvgEnergy - avgOverallCandEnergyPotential) /
+                              (avgOverallCandEnergyPotential * params.tryGetParam(t['track_id'],
+                                                                                  'candenergyskewdiminisher')))
+            t['optevents'] = int(params.tryGetParam(t['track_id'], 'baseopteventspertrack') * (1.0 - candEnergySkew))
+            t['optfirstchute'] = int(params.tryGetParam(t['track_id'], 'baseoptfirstchute') * (1.0 + candEnergySkew))
 
-            #Set up ideal length distribution curve
+            # Set up ideal length distribution curve
             discrLengthDistCurve = self.discretizeCurve(normLengthHistDist, max([c['length'] for c in candEventSpecs]))
             t['lengthdistidealcurve'] = self.actualizeCurve(discrLengthDistCurve, 1,
-                                                      t['optevents']/sum([n[1] for n in discrLengthDistCurve]))
+                                                            t['optevents'] / sum([n[1] for n in discrLengthDistCurve]))
             t['lengthdistactualhist'] = []
-            for i in range(0,  max([c['length'] for c in candEventSpecs])):
+            for i in range(0, max([c['length'] for c in candEventSpecs])):
                 t['lengthdistactualhist'].append([i + 1, 0])
 
             # Set up ideal length over time curve
             discrLengthOverTimeCurve = self.discretizeCurve(normLengthOverTimeDist,
-                                                        len(t['track'].trackholes))
+                                                            len(t['track'].trackholes))
             t['lengthovertimeideal'] = self.actualizeCurve(discrLengthOverTimeCurve, 1,
-                                                            max([c['length'] for c in candEventSpecs]))
+                                                           max([c['length'] for c in candEventSpecs]))
             t['maxlength'] = max([c['length'] for c in candEventSpecs])
 
             # Set up spacing histogram to help ensure even distribution
             t['spacinghisto'] = []
-            for i in range(0, int((t['optevents']/len(t['track'].trackholes))*params.tryGetParam(t['track_id'],
-                                                                                                 'eventspacingdeviationfactor'))):
-                t['spacinghisto'].append([i+1, 0])
+            for i in range(0, int((t['optevents'] / len(t['track'].trackholes)) * params.tryGetParam(t['track_id'],
+                                                                                                     'eventspacingdeviationfactor'))):
+                t['spacinghisto'].append([i + 1, 0])
 
             normTrackCurveNetEnergy = sum([c[1] for c in energyCurve])
             trackEnergyCurve = self.actualizeCurve(energyCurve, t['track'].length,
-                                                   (candAvgEnergy*t['optevents'])/normTrackCurveNetEnergy)
+                                                   (candAvgEnergy * t['optevents']) / normTrackCurveNetEnergy)
             t['trackenergycurve'] = trackEnergyCurve
             trackEnergyIntegral = self.actualizeCurve(energyNormIntegral, t['track'].length,
                                                       candAvgEnergy * t['optevents'], integrate=True)
             t['trackenergyintegral'] = trackEnergyIntegral
-            t['compensationbuffer'] = t['lengthdeviation']*gp.effectiveboardlength
+            t['compensationbuffer'] = t['lengthdeviation'] * gp.effectiveboardlength
             t['track'].setTentativeEvents([])
             t['eventsetbuild'] = t['track'].eventSetBuild
 
-        #Initial pass, try to populate tracks in tandem
+        # Initial pass, try to populate tracks in tandem
         avgHolePct, avgChutesPct = 0.0, 0.0
         allVectorsTest = set()
         baseVectorsTest = set()
         allTentative, allDirectTentative, allOrthoTentative = [], [], []
         stallCounter = 0
         while (len([t for t in trackEventsOverview if t['holescompletepct'] <
-                                                      1.0*params.tryGetParam(t['track_id'],
-                                                                             'holescompletetrackallowablecutoff')]) > 0 and
+                                                      1.0 * params.tryGetParam(t['track_id'],
+                                                                               'holescompletetrackallowablecutoff')]) > 0 and
                len([t for t in trackEventsOverview if t['chutescompletepct'] <
-                                                      1.0*params.tryGetParam(t['track_id'],'maxchuteoverdrivepct')]) > 0 and
+                                                      1.0 * params.tryGetParam(t['track_id'],
+                                                                               'maxchuteoverdrivepct')]) > 0 and
                stallCounter <= gp.maxitertrynewbuild):
             # if len([t for t in trackEventsOverview if t['holescompletepct'] < 0.9]) == 0:
             #     sfds=""
             if avgHolePct > 0.5:
-            #     test = [t for t in trackEventsOverview if t['holescompletepct'] < 1.0*params.maxchuteoverdrivepct]
-                 sdffds=""
+                #     test = [t for t in trackEventsOverview if t['holescompletepct'] < 1.0*params.maxchuteoverdrivepct]
+                sdffds = ""
             allTracksStalled = True
             for t in trackEventsOverview:
-                #NOTE: factoring for roundoff error w/ chutes pct
+                # NOTE: factoring for roundoff error w/ chutes pct
                 t['trackstalledcounter'] += 1
                 while t['chutescompletepct'] <= avgChutesPct + 0.001 and t['curhole'] < len(t['track'].trackholes):
                     allTracksStalled = False
                     idealEventWithFitness = None
                     isSharePop = False
                     if len(t['multistack']) == 0:
-                        #Find new event
+                        # Find new event
                         t['curhole'] += 1
                         t['minspacectr'] += 1
                         curHoleObj = t['track'].getHoleByNum(t['curhole'])
                         idealEventWithFitness = self.tryGetEventForHole(curHoleObj, t, allVectorsTest, baseVectorsTest,
                                                                         params, trackEventsOverview)
                     else:
-                        #Pop queued multi event
+                        # Pop queued multi event
                         idealEventWithFitness = t['multistack'].pop()
                         isSharePop = True
                         prevNode = 0
@@ -1482,16 +1902,14 @@ class EventSetBuilder:
                         #     sdf=""
                         #     self.testPlotVectorsOnHoles(allVectorsTest)
 
-
-
-                        #Great success!  Add event & update sets
+                        # Great success!  Add event & update sets
                         t['track'].addTentativeEvent(idealEventWithFitness['event'])
                         self.allTentLengthHisto[idealEventWithFitness['eventspecs']['length'] - 1][1] += 1
                         t['lengthdistactualhist'][idealEventWithFitness['eventspecs']['length'] - 1][1] += 1
-                        #NOTE: we subtract energy, but add in modulation
+                        # NOTE: we subtract energy, but add in modulation
                         t['energybuffer'] -= idealEventWithFitness['effnetenergy']
-                        #NOTE: we SUBTRACT, since boosters are (+) (decrease eff board length)
-                        #...and impeders are (-) (increase eff board length)
+                        # NOTE: we SUBTRACT, since boosters are (+) (decrease eff board length)
+                        # ...and impeders are (-) (increase eff board length)
                         t['compensationbuffer'] += idealEventWithFitness['effcompmodulation']
                         curEvent = idealEventWithFitness['event']
                         isOrtho = curEvent.isOrtho
@@ -1519,7 +1937,7 @@ class EventSetBuilder:
                             t['chutetops'].append(idealEventWithFitness['eventspecs']['eventtop'])
                             t['chutetops'].sort()
                         t['eventnodes'].extend([idealEventWithFitness['eventspecs']['eventbase'],
-                                               idealEventWithFitness['eventspecs']['eventtop']])
+                                                idealEventWithFitness['eventspecs']['eventtop']])
                         t['eventnodes'].sort()
                         if idealEventWithFitness['instladder']:
                             t['ladders'].append(dict(ladderbase=idealEventWithFitness['eventspecs']['eventbase'],
@@ -1532,7 +1950,7 @@ class EventSetBuilder:
                             t['laddertops'].sort()
                         t['previsladder'] = idealEventWithFitness['instladder']
                         t['spacinghisto'][(idealEventWithFitness['eventspecs']['eventtop']
-                                                                     - idealEventWithFitness['lasteventtop']) - 1][1] += 1
+                                           - idealEventWithFitness['lasteventtop']) - 1][1] += 1
                         t['lasteventtop'] = idealEventWithFitness['eventspecs']['eventtop']
 
                         if curEvent.instanceIsChute != curEvent.instanceIsLadder: self.cancels += 1
@@ -1547,7 +1965,7 @@ class EventSetBuilder:
                                 if t_sub is None:
                                     raise Exception("Multi event not linked up to track! 0_o")
                                 linkedEventSpecs = next((specs for specs in t_sub['candeventspecs']
-                                              if specs['event'] == ev), None)
+                                                         if specs['event'] == ev), None)
                                 if linkedEventSpecs is None:
                                     raise Exception("Candidate event specs not found for event 0_o")
                                 topHole = curEvent.endHole
@@ -1556,22 +1974,22 @@ class EventSetBuilder:
                                                                                t_sub['ladders'], t_sub['ladderbases'],
                                                                                t_sub['laddertops'], params,
                                                                                trackEventsOverview,
-                                                                                linkedEventSpecs,
+                                                                               linkedEventSpecs,
                                                                                idealEventWithFitness['instchute'],
                                                                                idealEventWithFitness['instladder'])[0]
                                 t_sub['multistack'].append(linkedEventWithScore)
 
                         # if len(allVectorsTest) == 150:
-                            # plt.figure(figsize=(10, 10))
-                            # temp = set()
-                            # temp.update(allVectorsTest)
-                            # temp.update()
-                            # for vector in allVectorsTest:
-                            #     x_values = [vector[0][0], vector[1][0]]
-                            #     y_values = [vector[0][1], vector[1][1]]
-                            #     plt.plot(x_values, y_values)
-                            # plt.show()
-                            # plt.waitforbuttonpress()
+                        # plt.figure(figsize=(10, 10))
+                        # temp = set()
+                        # temp.update(allVectorsTest)
+                        # temp.update()
+                        # for vector in allVectorsTest:
+                        #     x_values = [vector[0][0], vector[1][0]]
+                        #     y_values = [vector[0][1], vector[1][1]]
+                        #     plt.plot(x_values, y_values)
+                        # plt.show()
+                        # plt.waitforbuttonpress()
 
                     avgHolePct, avgChutesPct = self.recalcTrackCompletionPcts(trackEventsOverview)
 
@@ -1586,7 +2004,7 @@ class EventSetBuilder:
                                                            t['tracklength'],
                                                            readMode=True)[0] * (t['tracklength'] / t['controllength'])
             if abs(effLength - gp.effectiveboardlength) <= gp.minqualityboardlengthmatching:
-                #Lock this in!
+                # Lock this in!
                 t['track'].instLocked = True
 
             effLengths.append(dict(trackeventoverview=t, track_id=t['track_id'],
@@ -1603,30 +2021,30 @@ class EventSetBuilder:
                         break
             if not nodesFound: self.eventNodesByTrack.append(dict(tracknum=t['tracknum'], nodes=sortedNodes))
 
-            ctl = len(t['chutes'])/ len(t['ladders'] ) if len(t['ladders']) > 0 else 1.0
-            ltc = len(t['ladders'])/ len(t['chutes'] ) if len(t['chutes']) > 0 else 1.0
+            ctl = len(t['chutes']) / len(t['ladders']) if len(t['ladders']) > 0 else 1.0
+            ltc = len(t['ladders']) / len(t['chutes']) if len(t['chutes']) > 0 else 1.0
 
             print("{} chutes, {} ladders, {} events; ctl: {} ltc: {}".format(len(t['chutes']), len(t['ladders']),
                                                                              len(t['eventsetbuild']), ctl, ltc))
             print("Two hits: {}".format(t['twohitsthusfar']))
             print("{} nogos, {} denies".format(t['numnogos'], t['numdenies']))
 
-        avgEffLength = sum(l['efflength'] for l in effLengths)/len(effLengths)
+        avgEffLength = sum(l['efflength'] for l in effLengths) / len(effLengths)
 
         for l in effLengths:
             print("Track {} has effective length of {}, which should yield an approx {} balance"
                   .format(l['track_id'], l['efflength'],
-                          (gp.effectiveboardlength-l['efflength'])/gp.effectiveboardlength))
+                          (gp.effectiveboardlength - l['efflength']) / gp.effectiveboardlength))
 
         if (max([abs(l['efflength'] - gp.effectiveboardlength) for l in effLengths])
                 > gp.minqualityboardlengthmatching):
-            #Massage balanceandefflengthcontrolfactor and retry
-            #Longer balanceandefflengthcontrolfactor for longer route
+            # Massage balanceandefflengthcontrolfactor and retry
+            # Longer balanceandefflengthcontrolfactor for longer route
             for l in effLengths:
                 if l['tracklocked']: continue
                 oldVal = self.paramSet.tryGetParam(l['track_id'], "balanceandefflengthcontrolfactor")
                 newVal = oldVal
-                #Take avg of this eff length and prev, to smooth out jumps
+                # Take avg of this eff length and prev, to smooth out jumps
                 prevEffLength, prevEffIdx = gp.effectiveboardlength, -1
                 for l_prv_idx in range(0, len(prevEffLengths)):
                     if prevEffLengths[l_prv_idx]['track_id'] == l['track_id']:
@@ -1634,14 +2052,16 @@ class EventSetBuilder:
                         prevEffLength = prevEffLengths[l_prv_idx]['efflength']
                         break
 
-                if (prevEffLength + l['efflength'])/2 < gp.effectiveboardlength - gp.minqualityboardlengthmatching:
-                    #Increase factor to lengthen board
+                if (prevEffLength + l['efflength']) / 2 < gp.effectiveboardlength - gp.minqualityboardlengthmatching:
+                    # Increase factor to lengthen board
                     newVal = oldVal + gp.minqualityboardlengthintervalsrpt
-                elif (prevEffLength + l['efflength'])/2 > gp.effectiveboardlength + gp.minqualityboardlengthmatching:
-                    #Decrease factor to shorten board
+                elif (prevEffLength + l['efflength']) / 2 > gp.effectiveboardlength + gp.minqualityboardlengthmatching:
+                    # Decrease factor to shorten board
                     newVal = oldVal - gp.minqualityboardlengthintervalsrpt
-                if newVal > 0.95: newVal = 0.95
-                elif newVal < 0.05: newVal = 0.05
+                if newVal > 0.95:
+                    newVal = 0.95
+                elif newVal < 0.05:
+                    newVal = 0.05
                 self.paramSet.tryModParam(l['track_id'], "balanceandefflengthcontrolfactor", newVal)
                 prevEffLengths[prevEffIdx]['efflength'] = l['efflength']
 
@@ -1651,68 +2071,81 @@ class EventSetBuilder:
 
             return False
 
-
-        #Try to bring all sets down to lowest one! since cannot really decrease eff length at this point
-        #Given set of ladders, assume liklihood of landing on that square is 1/trackholes
-        #therefore try to find a ladder closest to the rem buffer to cancel
+        # Try to bring all sets down to lowest one! since cannot really decrease eff length at this point
+        # Given set of ladders, assume liklihood of landing on that square is 1/trackholes
+        # therefore try to find a ladder closest to the rem buffer to cancel
         # effShortestTrackBuff = min([t['compensationbuffer'] for t in trackEventsOverview])
         # for t in trackEventsOverview:
-            # trackLadders = [l for l in t['eventsetbuild'] if l.instanceIsLadder]
-            # trackLadders.sort(key = lambda l: l.length)
-            # trackLadderLengths = [l.length for l in trackLadders]
-            #
-            # effIncrease = int(t['compensationbuffer'] - effShortestTrackBuff)
-            # if effIncrease == 0:
-            #     t['trackfilled'] = True
-            #     continue
-            #
-            # idx = self.searchOrderedListForVal(trackLadderLengths, effIncrease)
-            # if idx > -1:
-            #     #Success! cancel this ladder and move on
-            #     trackLadders[idx].instanceIsLadder = False
-            #     t['trackfilled'] = True
-            # else:
-            #     effIncr1 = math.floor(effIncrease/2)
-            #     effIncr2 = math.floor(effIncrease/2) + effIncrease % 2
-            #     while effIncr1 > 0:
-            #         idx1 = self.searchOrderedListForVal(trackLadderLengths, effIncr1)
-            #         if idx1 > -1:
-            #             if effIncr1 == effIncr2:
-            #                 #Look left
-            #                 if idx1 > 0 and trackLadderLengths[idx-1] == effIncr2:
-            #                     trackLadders[idx1].instanceIsLadder = False
-            #                     trackLadders[idx1-1].instanceIsLadder = False
-            #                     t['trackfilled'] = True
-            #                     break
-            #                 #Look right
-            #                 elif idx1 < len(trackLadderLengths) - 1 and trackLadderLengths[idx+1] == effIncr2:
-            #                     trackLadders[idx1].instanceIsLadder = False
-            #                     trackLadders[idx1+1].instanceIsLadder = False
-            #                     t['trackfilled'] = True
-            #                     break
-            #             else:
-            #                 idx2 = self.searchOrderedListForVal(trackLadderLengths, effIncr2)
-            #                 if idx2 > -1:
-            #                     trackLadders[idx1].instanceIsLadder = False
-            #                     trackLadders[idx2].instanceIsLadder = False
-            #                     t['trackfilled'] = True
-            #                     break
-            #         effIncr1 -= 1
-            #         effIncr2 += 1
-
+        # trackLadders = [l for l in t['eventsetbuild'] if l.instanceIsLadder]
+        # trackLadders.sort(key = lambda l: l.length)
+        # trackLadderLengths = [l.length for l in trackLadders]
+        #
+        # effIncrease = int(t['compensationbuffer'] - effShortestTrackBuff)
+        # if effIncrease == 0:
+        #     t['trackfilled'] = True
+        #     continue
+        #
+        # idx = self.searchOrderedListForVal(trackLadderLengths, effIncrease)
+        # if idx > -1:
+        #     #Success! cancel this ladder and move on
+        #     trackLadders[idx].instanceIsLadder = False
+        #     t['trackfilled'] = True
+        # else:
+        #     effIncr1 = math.floor(effIncrease/2)
+        #     effIncr2 = math.floor(effIncrease/2) + effIncrease % 2
+        #     while effIncr1 > 0:
+        #         idx1 = self.searchOrderedListForVal(trackLadderLengths, effIncr1)
+        #         if idx1 > -1:
+        #             if effIncr1 == effIncr2:
+        #                 #Look left
+        #                 if idx1 > 0 and trackLadderLengths[idx-1] == effIncr2:
+        #                     trackLadders[idx1].instanceIsLadder = False
+        #                     trackLadders[idx1-1].instanceIsLadder = False
+        #                     t['trackfilled'] = True
+        #                     break
+        #                 #Look right
+        #                 elif idx1 < len(trackLadderLengths) - 1 and trackLadderLengths[idx+1] == effIncr2:
+        #                     trackLadders[idx1].instanceIsLadder = False
+        #                     trackLadders[idx1+1].instanceIsLadder = False
+        #                     t['trackfilled'] = True
+        #                     break
+        #             else:
+        #                 idx2 = self.searchOrderedListForVal(trackLadderLengths, effIncr2)
+        #                 if idx2 > -1:
+        #                     trackLadders[idx1].instanceIsLadder = False
+        #                     trackLadders[idx2].instanceIsLadder = False
+        #                     t['trackfilled'] = True
+        #                     break
+        #         effIncr1 -= 1
+        #         effIncr2 += 1
 
         # return len([t for t in trackEventsOverview if not t['trackfilled']]) == 0
         end_time = time.time()
         self.totalTime += end_time - start_time
-        totMarkov = self.miniMarkovTime/self.totalTime
-        totScore = self.scoringTime/self.totalTime
-        totBench = self.benchmarkSetupTime/self.totalTime
+        totMarkov = self.miniMarkovTime / self.totalTime
+        totScore = self.scoringTime / self.totalTime
+        totBench = self.benchmarkSetupTime / self.totalTime
         print("Minimarkov took up %s" % totMarkov)
         print("Scoring took up %s" % totScore)
 
         return True
 
     def testPlotVectorsOnHoles(self, vectors):
+        """
+        Creates a visualization of vectors overlaid on the board's hole positions.
+        
+        This method is primarily used for debugging and visualization purposes to see how
+        vectors (representing potential events) interact with the board's hole positions.
+        
+        Args:
+            vectors: List of vectors to plot, where each vector is a tuple of two points (start, end).
+            
+        Note:
+            Displays an interactive plot using matplotlib. The plot includes:
+            - Hole positions as points
+            - Track numbers and hole numbers as labels
+            - The input vectors as lines
+        """
         plt.figure(figsize=(15, 10))
         for vector in vectors:
             x_values = [vector[0][0], vector[1][0]]
@@ -1724,7 +2157,7 @@ class EventSetBuilder:
             x_coords, y_coords = zip(*coordinates)
             plt.scatter(x_coords, y_coords, marker='o')
 
-        #Add labels
+        # Add labels
         for t in self.board.tracks:
             plt.annotate(str(t.Track_ID), t.trackholes[0].coords)
             for c in t.trackholes:
@@ -1735,6 +2168,18 @@ class EventSetBuilder:
         plt.waitforbuttonpress()
 
     def buildSetIntoEvents(self):
+        """
+        Converts the current event set into actual game events on the board.
+        
+        This method takes the tentatively placed events and finalizes them by creating
+        the corresponding Chute and Ladder objects on each track. It also updates the
+        track's event impedance based on the placed events.
+        
+        Note:
+            - Converts events in track.eventSetBuild to Chute/Ladder objects
+            - Updates track's ladders and chutes lists
+            - Recalculates event impedance for each track
+        """
         for t in self.board.tracks:
             for e in t.eventSetBuild:
                 if e.instanceIsLadder: t.addLadder(bd.Ladder(e.startHole.num, e.endHole.num, t.num, e.crowVector, e))
@@ -1742,10 +2187,26 @@ class EventSetBuilder:
             t.setEventLadders([l.start for l in t.ladders])
             t.setEventChutes([c.start for c in t.chutes])
 
-            #Set descriptive stats
+            # Set descriptive stats
             t.setEventImpedance()
 
     def buildExplicitSetIntoEvents(self, explicitEventSet):
+        """
+        Builds a specific set of events into the board's tracks.
+        
+        This method allows for manual specification of events rather than generating
+        them algorithmically. It's useful for testing specific configurations or
+        implementing custom event placement logic.
+        
+        Args:
+            explicitEventSet: A list of event sets, where each set corresponds to a track.
+                             Each set contains Event objects to be placed on that track.
+                             
+        Note:
+            - Clears any existing events before applying the new set
+            - Creates Chute and Ladder objects for each event
+            - Updates track's event impedance
+        """
         self.clearEventSet()
         for es in explicitEventSet:
             t = self.board.getTrackByNum(es[0].trackNum)
@@ -1756,10 +2217,8 @@ class EventSetBuilder:
             t.setEventLadders([l.start for l in t.ladders])
             t.setEventChutes([c.start for c in t.chutes])
 
-            #Set descriptive stats
+            # Set descriptive stats
             t.setEventImpedance()
-
-
 
     def plot_coordinates_and_vectors(self, bitmap_name='output_bitmap.png'):
         """
@@ -1771,7 +2230,6 @@ class EventSetBuilder:
             bitmap_name (str): The name of the output bitmap file.
         """
 
-
         plt.figure(figsize=(20, 20))
         coordinate_sets = []
         path_dot_vectors = []
@@ -1781,28 +2239,28 @@ class EventSetBuilder:
             holes = [h.coords for h in t.trackholes]
             coordinate_sets.append(holes)
             for c_idx in range(len(holes) - 1):
-                path_dot_vectors.append((holes[c_idx], holes[c_idx+1]))
+                path_dot_vectors.append((holes[c_idx], holes[c_idx + 1]))
             trackVectorSet = []
             for l, ch in zip([True, True, False], [True, False, True]):
                 trackVectorSubset = []
                 trackVectorSubset.extend([c.crowVector for c in t.chutes if not c.eventDete.isOrtho
-                                       and c.eventDete.instanceIsLadder == l and c.eventDete.instanceIsChute == ch])
+                                          and c.eventDete.instanceIsLadder == l and c.eventDete.instanceIsChute == ch])
                 trackVectorSubset.extend([c.eventDete.instanceStartVector for c in t.chutes if c.eventDete.isOrtho
-                                       and c.eventDete.instanceIsLadder == l and c.eventDete.instanceIsChute == ch])
+                                          and c.eventDete.instanceIsLadder == l and c.eventDete.instanceIsChute == ch])
                 trackVectorSubset.extend([c.eventDete.instanceEndVector for c in t.chutes if c.eventDete.isOrtho
-                                       and c.eventDete.instanceIsLadder == l and c.eventDete.instanceIsChute == ch])
+                                          and c.eventDete.instanceIsLadder == l and c.eventDete.instanceIsChute == ch])
                 trackVectorSet.append(trackVectorSubset)
 
                 if l and not ch:
                     x_marks.extend([c.crowVector[1] for c in t.chutes if not c.eventDete.isOrtho
-                                       and c.eventDete.instanceIsLadder == l and c.eventDete.instanceIsChute == ch])
+                                    and c.eventDete.instanceIsLadder == l and c.eventDete.instanceIsChute == ch])
                     x_marks.extend([c.eventDete.instanceEndVector[0] for c in t.chutes if c.eventDete.isOrtho
-                                       and c.eventDete.instanceIsLadder == l and c.eventDete.instanceIsChute == ch])
+                                    and c.eventDete.instanceIsLadder == l and c.eventDete.instanceIsChute == ch])
                 elif ch and not l:
                     x_marks.extend([c.crowVector[0] for c in t.chutes if not c.eventDete.isOrtho
-                                       and c.eventDete.instanceIsLadder == l and c.eventDete.instanceIsChute == ch])
+                                    and c.eventDete.instanceIsLadder == l and c.eventDete.instanceIsChute == ch])
                     x_marks.extend([c.eventDete.instanceStartVector[0] for c in t.chutes if c.eventDete.isOrtho
-                                       and c.eventDete.instanceIsLadder == l and c.eventDete.instanceIsChute == ch])
+                                    and c.eventDete.instanceIsLadder == l and c.eventDete.instanceIsChute == ch])
 
             vector_sets.append(trackVectorSet)
 
@@ -1817,7 +2275,7 @@ class EventSetBuilder:
             y_values = [vector[0][1], vector[1][1]]
             plt.plot(x_values, y_values, linestyle=':', color='black', linewidth=1)
 
-        #Plot lumps for cannot enter
+        # Plot lumps for cannot enter
         lumps = []
         lumps.extend([tuple(c.eventDete.instanceLump) for c in [c for t in self.board.tracks for c in t.chutes]
                       if c.eventDete.instanceLump != (-1, -1)])
@@ -1827,7 +2285,7 @@ class EventSetBuilder:
             x_coords, y_coords = coordinates[0], coordinates[1]
             plt.scatter(x_coords, y_coords, marker="s")
 
-        #Add labels
+        # Add labels
         for t in self.board.tracks:
             plt.annotate(str(t.Track_ID), t.trackholes[0].coords)
             for c in t.trackholes:
@@ -1847,7 +2305,7 @@ class EventSetBuilder:
                     plt.plot(x_values, y_values, color=colours[colourCounter])  # 'r-' means red line
                 colourCounter += 1
 
-        #Ploy x's on vectors for ladders-only & chutes-onlly
+        # Ploy x's on vectors for ladders-only & chutes-onlly
         # for c in x_marks:
         #     plt.annotate("x", c, fontsize=18)
 
@@ -1863,8 +2321,34 @@ class EventSetBuilder:
         plt.waitforbuttonpress()
         # plt.close()
 
+
 class OrthoPath:
+    """
+    Represents an orthogonal path between points on the game board.
+
+    Used for generating and managing orthogonal event paths such as ladders and chutes.
+
+    Attributes:
+        start: Starting coordinates of the path.
+        mid: Midpoint coordinates of the path.
+        end: Ending coordinates of the path.
+        incr: Increment value for path generation.
+        rev: Boolean indicating if the path is reversed.
+        event: The event associated with this path.
+    """
+
     def __init__(self, start, mid, end, incr, rev, event):
+        """
+        Initialize an OrthoPath with start, middle, and end points.
+
+        Args:
+            start: Starting coordinates (x, y) of the path.
+            mid: Midpoint coordinates (x, y) of the path.
+            end: Ending coordinates (x, y) of the path.
+            incr: Increment value used in path generation.
+            rev: Boolean indicating if the path is reversed.
+            event: The event object associated with this path.
+        """
         self.start = start
         self.mid = mid
         self.end = end
@@ -1873,21 +2357,46 @@ class OrthoPath:
         self.rev = rev
         self.event = event
 
+
 class OrthoLineTrace:
+    """
+    Represents a trace line for orthogonal event placement.
+
+    Used to calculate and validate the placement of orthogonal events
+    such as ladders and chutes on the game board.
+
+    Attributes:
+        event: The event this trace is associated with.
+        incr: Increment value for trace generation.
+        rev: Boolean indicating if the trace is reversed.
+        type: Type of the orthogonal line trace.
+        vector: Tuple of coordinate pairs representing the trace vector.
+    """
+
     def __init__(self, possibleEvents, event, incr, rev, type):
+        """
+        Initialize an OrthoLineTrace for an event.
+
+        Args:
+            possibleEvents: Collection of possible events.
+            event: The event to create a trace for.
+            incr: Increment value for trace generation.
+            rev: Boolean indicating if the trace is reversed.
+            type: Type of the orthogonal line trace (START or END).
+        """
         self.event = event
         self.incr = incr
         self.rev = rev
         self.type = type
-        self.vector = ((-1,-1),(-1,-1))
+        self.vector = ((-1, -1), (-1, -1))
 
-        p1,p2=(-1,-1),(-1,-1)
+        p1, p2 = (-1, -1), (-1, -1)
         midpoint = tuple([sum(c) / 2 for c in zip(self.event.startHole.coords, self.event.endHole.coords)])
-        orthogonal_vector = tuple([(-1 if rev else 1)* o for o in self.event.orthoVector])
+        orthogonal_vector = tuple([(-1 if rev else 1) * o for o in self.event.orthoVector])
         orthogonal_vector = possibleEvents.orthogonal_vector(self.event.startHole.coords, self.event.endHole.coords,
                                                              gp.maxloopyorthoeventdisplacementincrements
                                                              * gp.eventminspacing, rev)
-        length_divider = incr/gp.maxloopyorthoeventdisplacementincrements
+        length_divider = incr / gp.maxloopyorthoeventdisplacementincrements
         match type:
             case en.OrthoLineTraceType.START:
                 p1 = self.event.startHole.coords
@@ -1900,9 +2409,11 @@ class OrthoLineTrace:
               midpoint[1] + orthogonal_vector[1] * length_divider)
 
         self.vector = (p1, p2)
+
     def __key(self):
         return (self.event, self.rev, self.incr)
-    #NOTE: do not put objects of multiple types in a set!!!
+
+    # NOTE: do not put objects of multiple types in a set!!!
 
     def __hash__(self):
         return hash(self.__key())
@@ -1911,6 +2422,7 @@ class OrthoLineTrace:
         if isinstance(other, OrthoLineTrace):
             return self.__key() == other.__key()
         return NotImplemented
+
     def __lt__(self, other):
         # Define the comparison order
         if self.event != other.event:
@@ -1919,8 +2431,28 @@ class OrthoLineTrace:
             return self.rev < other.rev
         return self.incr < other.incr
 
+
 class ParamSet:
+    """
+    Manages parameters for event set generation and optimization.
+
+    This class handles the configuration and optimization of various parameters
+    that control how events are generated and placed on the game board.
+
+    Attributes:
+        board: Reference to the game board.
+        tracks: List of tracks on the game board.
+        params: List of parameter configurations.
+    """
+
     def __init__(self, board, tracks):
+        """
+        Initialize the ParamSet with board and tracks.
+
+        Args:
+            board: The game board object.
+            tracks: List of tracks on the game board.
+        """
         # HOLE AND LENGTH BASED INTS:
         # baseopteventspertrack
         # ladderscanstartat
@@ -1946,13 +2478,26 @@ class ParamSet:
         self.params = []
 
     def intakeParams(self, instanceParams_df):
+        """
+        Load parameters from a DataFrame.
+
+        Args:
+            instanceParams_df: DataFrame containing parameter configurations.
+        """
         self.params = []
-        #Cursor thru params setting as needed
+        # Cursor thru params setting as needed
         for index, param_sr in instanceParams_df.iterrows():
             # Prioritize track override if exists
             self.params.append(dict(track_id=param_sr['track_id'], param=param_sr['param'], value=param_sr['value']))
 
     def intakeParamsFromDb(self, optimizerRunSet, optimizerRun):
+        """
+        Load parameters from the database.
+
+        Args:
+            optimizerRunSet: Identifier for the optimizer run set.
+            optimizerRun: Identifier for the specific optimizer run.
+        """
         with contextlib.closing(sql.connect('etc/Optimizer.db')) as sqlConn:
             with sqlConn:
                 self.params = []
@@ -1966,23 +2511,28 @@ class ParamSet:
                 paramsQuery_sb.write("where os.OptimizerRunSet = ? ")
                 paramsQuery_sb.write("and o.OptimizerRun = ? ")
                 params_df = pd.read_sql_query(paramsQuery_sb.getvalue(), sqlConn,
-                                                   params=[optimizerRunSet, optimizerRun])
-                #Cursor thru params setting as needed
+                                              params=[optimizerRunSet, optimizerRun])
+                # Cursor thru params setting as needed
                 for index, param_sr in params_df.iterrows():
                     # Prioritize track override if exists
                     self.params.append(dict(track_id=param_sr['Track_ID'], param=param_sr['Param'],
                                             value=param_sr['InstanceParamValue']))
 
-
     def midpointInitParams(self):
+        """
+        Initialize parameters with midpoint values for optimization.
+
+        This sets up default parameter values that are in the middle of their
+        allowed ranges to provide a good starting point for optimization.
+        """
         with contextlib.closing(sql.connect('etc/Optimizer.db')) as sqlConn:
             with sqlConn:
                 with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
-                    #Retrieve base values from db
+                    # Retrieve base values from db
                     query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID = ? AND Active = ?"
                     sqliteCursor.execute(query, [self.board.boardID, 0, 1])
                     boardparamranges_df = pd.DataFrame(sqliteCursor.fetchall(),
-                                                      columns=[d[0] for d in sqliteCursor.description])
+                                                       columns=[d[0] for d in sqliteCursor.description])
                     if len(boardparamranges_df) == 0:
                         raise Exception("No param bounds found for board ID {}".format(self.board.boardID))
 
@@ -2001,35 +2551,41 @@ class ParamSet:
                         query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID = ? AND Active = ?"
                         sqliteCursor.execute(query, [self.board.boardID, t.Track_ID, 1])
                         trackparamranges_df = pd.concat([pd.DataFrame(sqliteCursor.fetchall(),
-                                                          columns=[d[0] for d in sqliteCursor.description]),
+                                                                      columns=[d[0] for d in sqliteCursor.description]),
                                                          boardparamranges_df])
                         trackparamranges_df.sort_values(['Param', 'Track_ID'], inplace=True,
                                                         ascending=False)
 
-                        #Set params from ranges
+                        # Set params from ranges
                         prevParam = ""
                         for index, param_sr in trackparamranges_df.iterrows():
-                            #Prioritize track override if exists
+                            # Prioritize track override if exists
                             if param_sr['Param'] == prevParam: continue
                             if param_sr['isInt'] == 1:
-                                curVal = (int(param_sr['LBound']) + int(param_sr['UBound']))//2
+                                curVal = (int(param_sr['LBound']) + int(param_sr['UBound'])) // 2
                             else:
-                                curVal = (param_sr['LBound'] + param_sr['UBound'])/2
+                                curVal = (param_sr['LBound'] + param_sr['UBound']) / 2
                             self.params.append(dict(track_id=t.Track_ID, param=param_sr['Param'], value=curVal))
                             prevParam = param_sr['Param']
 
     def monteCarlo(self):
+        """
+        Perform a Monte Carlo simulation to optimize parameters.
+
+        Randomly samples parameter values within their defined ranges to find
+        optimal configurations for event generation.
+        """
         with contextlib.closing(sql.connect('etc/Optimizer.db')) as sqlConn:
             with sqlConn:
                 with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
-                    #Retrieve base values from db
+                    # Retrieve base values from db
                     query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID = ? AND Active = ?"
                     sqliteCursor.execute(query, [self.board.boardID, 0, 1])
                     boardparamranges_df = pd.DataFrame(sqliteCursor.fetchall(),
-                                                      columns=[d[0] for d in sqliteCursor.description])
+                                                       columns=[d[0] for d in sqliteCursor.description])
                     if len(boardparamranges_df) == 0:
                         raise Exception("No param bounds found for board ID {}".format(self.board.boardID))
-            
+
                     # Set params from ranges for board
                     self.params = []
                     # for index, param_sr in boardparamranges_df.iterrows():
@@ -2039,21 +2595,21 @@ class ParamSet:
                     #     else:
                     #         curVal = rd.uniform(param_sr['LBound'], param_sr['UBound'])
                     #     self.params.append(dict(track_id=0, param=param_sr['Param'], value=curVal))
-            
+
                     for t in self.tracks:
                         # Try to retrieve overrides if exist
                         query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID = ? AND Active = ?"
                         sqliteCursor.execute(query, [self.board.boardID, t.Track_ID, 1])
                         trackparamranges_df = pd.concat([pd.DataFrame(sqliteCursor.fetchall(),
-                                                          columns=[d[0] for d in sqliteCursor.description]),
+                                                                      columns=[d[0] for d in sqliteCursor.description]),
                                                          boardparamranges_df])
                         trackparamranges_df.sort_values(['Param', 'Track_ID'], inplace=True,
                                                         ascending=False)
-            
-                        #Set params from ranges
+
+                        # Set params from ranges
                         prevParam = ""
                         for index, param_sr in trackparamranges_df.iterrows():
-                            #Prioritize track override if exists
+                            # Prioritize track override if exists
                             if param_sr['Param'] == prevParam: continue
                             if param_sr['isInt'] == 1:
                                 curVal = rd.randint(int(param_sr['LBound']), int(param_sr['UBound']))
@@ -2062,21 +2618,28 @@ class ParamSet:
                             self.params.append(dict(track_id=t.Track_ID, param=param_sr['Param'], value=curVal))
                             prevParam = param_sr['Param']
 
-
     def tempInsertParamsDb(self, optimizerRunSet, optimizerRun):
+        """
+        Temporarily store parameters in the database.
+
+        Args:
+            optimizerRunSet: Identifier for the optimizer run set.
+            optimizerRun: Identifier for the specific optimizer run.
+        """
         with contextlib.closing(sql.connect('etc/Optimizer.db')) as sqlConn:
             with sqlConn:
                 with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
                     query = "INSERT INTO OptimizerRuns (OptimizerRunSet, OptimizerRun, Board_ID, Timestamp) VALUES (?,?,?,?)"
-                    sqliteCursor.execute(query, [optimizerRunSet, optimizerRun, self.board.boardID, dt.now().strftime('%m/%d/%y %H:%M:%S')])
+                    sqliteCursor.execute(query, [optimizerRunSet, optimizerRun, self.board.boardID,
+                                                 dt.now().strftime('%m/%d/%y %H:%M:%S')])
                     sqlConn.commit()
-            
+
                     params_df = pd.DataFrame.from_records(self.params)
                     # params_df.rename(columns={"track_id": "Track_ID", "param": "Param", "value": "InstanceParamValue"})
                     params_df['Board_ID'] = self.board.boardID
                     params_df['OptimizerRunSet'] = optimizerRunSet
                     params_df['OptimizerRun'] = optimizerRun
-            
+
                     # Insert into data table
                     params_l = params_df.values.tolist()
                     paramsQuery_sb = StringIO()
@@ -2085,21 +2648,36 @@ class ParamSet:
                     sqliteCursor.execute("BEGIN TRANSACTION")
                     for index, record in params_df.iterrows():
                         sqliteCursor.execute(paramsQuery_sb.getvalue(), [record['track_id'], record['param'],
-                                                                              record['value'], record['Board_ID'],
-                                                                              record['OptimizerRunSet'],record['OptimizerRun']])
+                                                                         record['value'], record['Board_ID'],
+                                                                         record['OptimizerRunSet'],
+                                                                         record['OptimizerRun']])
                     sqliteCursor.execute("END TRANSACTION")
-            
+
                     sqlConn.commit()
                     paramsQuery_sb.close()
 
     def tempWriteMetricsToDb(self, evaluator):
+        """
+        Writes optimization metrics to the database for analysis and tracking.
+        
+        This method records various performance metrics from the evaluator to the optimizer database,
+        which can be used for analyzing optimization performance and debugging.
+        
+        Args:
+            evaluator: The evaluator object containing metrics to be recorded.
+            
+        Note:
+            - Connects to 'etc/Optimizer.db' SQLite database
+            - Creates necessary tables if they don't exist
+            - Records metrics in a transaction for data consistency
+        """
         with contextlib.closing(sql.connect('etc/Optimizer.db')) as sqlConn:
             with sqlConn:
                 with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
 
                     # Input metric info
                     metrics_df = pd.DataFrame.from_records(evaluator.results)
-                    metrics_df['WeightedValue'] = metrics_df['Weighting']*metrics_df['ResultValue']
+                    metrics_df['WeightedValue'] = metrics_df['Weighting'] * metrics_df['ResultValue']
                     metrics_df.drop(['Weighting', 'ResultValueIterative'], axis=1, inplace=True)
                     metrics_df['OptimizerRunSet'] = evaluator.optimizerRunSet
                     metrics_df['OptimizerRun'] = evaluator.optimizerRun
@@ -2121,7 +2699,8 @@ class ParamSet:
                     # sqliteCursor.execute("select * from  Testtest")
                     for index, record in metrics_df.iterrows():
                         sqliteCursor.execute(metricsQuery_sb.getvalue(), [record['Result'], record['ResultFlavour'],
-                                                                          record['ResultValue'], record['WeightedValue'],
+                                                                          record['ResultValue'],
+                                                                          record['WeightedValue'],
                                                                           record['OptimizerRunSet'],
                                                                           record['OptimizerRun'], record['Board_ID']])
 
@@ -2131,23 +2710,61 @@ class ParamSet:
                     metricsQuery_sb.close()
 
     def tempWriteEvents(self, stats, optimizerRunSet, optimizerRun):
+        """
+        Writes event data to the database for a specific optimization run.
+        
+        This method records the current state of events (chutes and ladders) to the database
+        for a given optimization run, allowing for tracking of how events evolve during optimization.
+        
+        Args:
+            stats: Dictionary containing statistics about the current optimization state.
+            optimizerRunSet: Identifier for the set of optimization runs.
+            optimizerRun: Specific run identifier within the set.
+            
+        Note:
+            - Records events in a transaction for data consistency
+            - Tracks both chutes and ladders with their properties
+            - Updates the database with the current best event configuration
+        """
         with contextlib.closing(sql.connect('etc/Optimizer.db')) as sqlConn:
             with sqlConn:
                 with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
                     # Cache events hit in db
-                    eventshit_df = pd.DataFrame.from_records([m.to_dict() for m in stats.moves if m.ladderorchuteamt != 0])
+                    eventshit_df = pd.DataFrame.from_records(
+                        [m.to_dict() for m in stats.moves if m.ladderorchuteamt != 0])
                     query = "INSERT INTO EventHit Values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                     sqliteCursor.execute("BEGIN TRANSACTION")
                     for idx, move in eventshit_df.iterrows():
                         sqliteCursor.execute(query, (optimizerRunSet, optimizerRun, self.board.boardID,
-                                                     move['trial'], move['track_id'], move['threadnum'],move['movenum'],
-                                                     move['currpos'] - move['score'] + move['basescore'], move['currpos'],
+                                                     move['trial'], move['track_id'], move['threadnum'],
+                                                     move['movenum'],
+                                                     move['currpos'] - move['score'] + move['basescore'],
+                                                     move['currpos'],
                                                      move['score'] - move['basescore']))
 
                     sqliteCursor.execute("END TRANSACTION")
                     sqlConn.commit()
 
     def modParamsForFmin(self, paramsSubset, fminParamsList):
+        """
+        Modifies parameters for function minimization during optimization.
+        
+        This method prepares and updates parameter values for use in the optimization
+        process, converting between the optimization algorithm's format and the
+        internal parameter representation.
+        
+        Args:
+            paramsSubset: List of parameter names to be modified.
+            fminParamsList: List of parameter values from the optimization algorithm.
+            
+        Returns:
+            DataFrame: Updated parameters with new values for the specified subset.
+            
+        Note:
+            - Handles parameter scaling and transformation if needed
+            - Maintains parameter bounds and constraints
+            - Updates the internal parameter state
+        """
         allParams_df = pd.DataFrame.from_records(self.params)
         allParams_df.set_index(['param'], inplace=True)
         allParams_df.sort_index(inplace=True)
@@ -2165,9 +2782,21 @@ class ParamSet:
             self.params.append(
                 dict(track_id=param_sr['track_id'], param=index, value=param_sr['value']))
 
+    def tryGetParam(self, track_ID, paramName, optional=False):
+        """
+        Retrieve a parameter value by track ID and parameter name.
 
+        Args:
+            track_ID: ID of the track to get the parameter for.
+            paramName: Name of the parameter to retrieve.
+            optional: If True, returns None if parameter not found instead of raising an error.
 
-    def tryGetParam(self, track_ID, paramName, optional = False):
+        Returns:
+            The parameter value if found, None if optional and not found.
+
+        Raises:
+            Exception: If parameter is not found and optional is False.
+        """
         record = next((param for param in self.params if param['param'] == paramName and
                        param['track_id'] == track_ID), None)
         if record is None:
@@ -2177,8 +2806,19 @@ class ParamSet:
         return record['value']
 
     def tryModParam(self, track_ID, paramName, newValue):
+        """
+        Modify a parameter value.
+
+        Args:
+            track_ID: ID of the track containing the parameter.
+            paramName: Name of the parameter to modify.
+            newValue: New value to set for the parameter.
+
+        Returns:
+            bool: True if parameter was found and modified, False otherwise.
+        """
         # Iterate through the list of dictionaries
-        for record in self.params :
+        for record in self.params:
             if record['track_id'] == track_ID and record['param'] == paramName:
                 record['value'] = newValue
                 break  # Exit the loop once the record is found and modified

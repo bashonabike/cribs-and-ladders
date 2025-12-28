@@ -1,32 +1,32 @@
-#region plan
-#Build set of all combinations of two points on track where angle > x deg off from instant slope (approx orthogonality)
-#For each prospective event, do search for all holes OF ANY TRACK within the rectangle of say 11 mm (give good amt of room)
-#if any found, cache it for prospective 2 or 3 track wide event
-#else, include in set of prospects
-#next, build set of mult-track events
-#continue trace of line (via lengthening rectangle) in both directions until symetry obtained
-#may need more sophisticated appraoch eventually but should suffice initially
-#If rectangle hits more than 1 hole on search, maybe spawn into seperate event options for each viable combination
+# region plan
+# Build set of all combinations of two points on track where angle > x deg off from instant slope (approx orthogonality)
+# For each prospective event, do search for all holes OF ANY TRACK within the rectangle of say 11 mm (give good amt of room)
+# if any found, cache it for prospective 2 or 3 track wide event
+# else, include in set of prospects
+# next, build set of mult-track events
+# continue trace of line (via lengthening rectangle) in both directions until symetry obtained
+# may need more sophisticated appraoch eventually but should suffice initially
+# If rectangle hits more than 1 hole on search, maybe spawn into seperate event options for each viable combination
 
-#grrr rectangle not cartesian
-#new plan: include all points on all tracks that are within rectangle constructed where each event point is corner
-#maybe broaden the rectangle by like 5mm or something on all sides, to be safe
-#draw line segment between each contenders to forward & backward respective neighbour on their path
-#check intersection for each
-#Search in each opposite direction maybe like max 20mm or so, if cannot aquire symmetry scrap it
-#Order intersects by proximity
+# grrr rectangle not cartesian
+# new plan: include all points on all tracks that are within rectangle constructed where each event point is corner
+# maybe broaden the rectangle by like 5mm or something on all sides, to be safe
+# draw line segment between each contenders to forward & backward respective neighbour on their path
+# check intersection for each
+# Search in each opposite direction maybe like max 20mm or so, if cannot aquire symmetry scrap it
+# Order intersects by proximity
 
-#if not orthogonal, draw ortho line to direct vector btwn points either dir containing bounding rectangle
-#keep going until intersect edge of board or another track
-#define this space broken into 11mm slices as possible side tracks
-#set max loopy distance, maybe as function of spacing btwn event holes
-#set bounding rect for line intersects based on max
-#when determining set of events for each test, need to ensure enough space for all
-#give priority to events closest together (eg: 3 space diff goes first)
+# if not orthogonal, draw ortho line to direct vector btwn points either dir containing bounding rectangle
+# keep going until intersect edge of board or another track
+# define this space broken into 11mm slices as possible side tracks
+# set max loopy distance, maybe as function of spacing btwn event holes
+# set bounding rect for line intersects based on max
+# when determining set of events for each test, need to ensure enough space for all
+# give priority to events closest together (eg: 3 space diff goes first)
 
-#Set spec  # long events, all chutes  only
-#Set cutoff of when ladders can start (eg: after Hole 10)
-#endregion
+# Set spec  # long events, all chutes  only
+# Set cutoff of when ladders can start (eg: after Hole 10)
+# endregion
 
 import matplotlib.path as mpath
 import numpy as np
@@ -42,10 +42,23 @@ import os
 import bisect as bsc
 from io import StringIO
 
+
 class PossibleEvents:
 
     def __init__(self, board):
-        todo = "figure this out"
+        """
+        Initialize the PossibleEvents object.
+
+        Args:
+            board (board): The board object to find possible events on.
+
+        Attributes:
+            allTracksCandidateSet (list): A list of candidate events across all tracks.
+            byTrackCandidateSets (list): A list of lists of candidate events, each list corresponding candidate events for a single track.
+            multiTrackCandidateSet (list): A list of candidate events that span multiple tracks.
+            board (board): The board object to find possible events on.
+        """
+        # TODO: figure this out
         self.allTracksCandidateSet, self.byTrackCandidateSets = None, []
         self.multiTrackCandidateSet = None
         self.board = board
@@ -54,20 +67,38 @@ class PossibleEvents:
             self.buildSet(board, sqlConn)
 
     def tryRetrieveCache(self, sqlConn):
-        #Retrieve cached data if exists
+        """
+        Attempts to retrieve cached candidate event data from the TempCandidateEvents table.
+
+        Args:
+            sqlConn (sqlite3.Connection): The connection to the SQLite database.
+
+        Returns:
+            bool: True if the candidate event data was successfully retrieved from the cache, False otherwise.
+
+        Notes:
+            The function first checks if there is any candidate event data for the given board ID in the TempCandidateEvents table.
+            If there is no data, it returns False.
+            If there is data, it then checks if the board files have been updated since the last cache.
+            If the files have been updated, it resets the candidate events for the board and returns False.
+            If the files have not been updated, it parses the cached data into candidate events and sets up linked events.
+            Finally, it returns True to indicate that the candidate event data was successfully retrieved from the cache.
+        """
+        # Retrieve cached data if exists
+
         query = ("SELECT c.* FROM TempCandidateEvents c " +
-                "WHERE c.Board_ID = ? " +
-                "ORDER BY c.Board_ID, c.Track_ID, c.CandidateEvent_ID")
+                 "WHERE c.Board_ID = ? " +
+                 "ORDER BY c.Board_ID, c.Track_ID, c.CandidateEvent_ID")
         sqliteCursor = sqlConn.cursor()
         sqliteCursor.execute(query, [self.board.boardID])
         candidateEvents_df = pd.DataFrame(sqliteCursor.fetchall(), columns=[d[0] for d in sqliteCursor.description])
         if len(candidateEvents_df) == 0: return False
 
-        #Verify files have not been updated since last cache
+        # Verify files have not been updated since last cache
         tempTableUpdated = dt.strptime(candidateEvents_df.iloc[0]['Timestamp'], '%m/%d/%y %H:%M:%S')
         sqlConnBoard = sql.connect('Boards/AllBoards.db')
         boardQuery = ("SELECT  b.Track1BoardPath, b.Track2BoardPath, b.Track3BoardPath, b.TwoDeckLineBoardPath " +
-                 "FROM Board b WHERE b.Board_ID = ?")
+                      "FROM Board b WHERE b.Board_ID = ?")
         boardFiles = sqlConnBoard.execute(boardQuery, [self.board.boardID]).fetchall()
         for file in boardFiles[0]:
             if file in ("", None): continue
@@ -78,7 +109,7 @@ class PossibleEvents:
                 sqlConn.commit()
                 return False
 
-        #If passed gauntlet, then Great Job!  Parse cached data into candidate events
+        # If passed gauntlet, then Great Job!  Parse cached data into candidate events
         curTrackNum = -1
         curTrack = None
         currCandSetList = []
@@ -94,10 +125,12 @@ class PossibleEvents:
             curEvent = CandidateEvent(event_sr['trackNum'], curTrack.getHoleByNum(event_sr['startHole']),
                                       curTrack.getHoleByNum(event_sr['endHole']),
                                       event_sr['isOrtho'],
-                                      orthoFwdMinIncr=event_sr['orthoFwdMinIncr'], orthoRevMinIncr=event_sr['orthoRevMinIncr'],
-                                      orthoFwdMaxIncr=event_sr['orthoFwdMaxIncr'], orthoRevMaxIncr=event_sr['orthoRevMaxIncr'])
+                                      orthoFwdMinIncr=event_sr['orthoFwdMinIncr'],
+                                      orthoRevMinIncr=event_sr['orthoRevMinIncr'],
+                                      orthoFwdMaxIncr=event_sr['orthoFwdMaxIncr'],
+                                      orthoRevMaxIncr=event_sr['orthoRevMaxIncr'])
             curEvent.db_hash = event_sr["CandidateEvent_ID"]
-            curEvent.eventID  = event_sr["CandidateEvent_ID"]
+            curEvent.eventID = event_sr["CandidateEvent_ID"]
             curEvent.linkFinderHash = event_sr['FinderHash']
             curEvent.instanceIncr = event_sr['instanceIncr']
             curEvent.instanceRev = event_sr['instanceRev']
@@ -108,35 +141,58 @@ class PossibleEvents:
                 curEvent.sharedWithTracks = [int(t) for t in event_sr['sharedWithTracks'].split(",")]
                 linkList.append(dict(mainevent=curEvent,
                                      mainhash=event_sr['FinderHash'],
-                                     linkeventhash1=event_sr['linkedEvent1'] if event_sr['linkedEvent1'] is not None else -1,
-                                     linkeventhash2=event_sr['linkedEvent2'] if event_sr['linkedEvent2'] is not None else -1))
+                                     linkeventhash1=event_sr['linkedEvent1'] if event_sr[
+                                                                                    'linkedEvent1'] is not None else -1,
+                                     linkeventhash2=event_sr['linkedEvent2'] if event_sr[
+                                                                                    'linkedEvent2'] is not None else -1))
 
-        #Add candidate event sets to respective tracks
+        # Add candidate event sets to respective tracks
         for cs in currCandSetList:
             curTrack = self.board.getTrackByNum(cs.trackNum)
             curTrack.candidateEvents = cs
 
-        #Set up linked events
+        # Set up linked events
         if len(linkList) > 0:
-            linkList.sort(key = lambda l: l['mainhash'])
+            linkList.sort(key=lambda l: l['mainhash'])
             linkListFinder = [l['mainhash'] for l in linkList]
             for m in linkList:
                 links = []
                 for l in [m['linkeventhash1'], m['linkeventhash2']]:
                     if l is not None and l != "":
                         idx = bsc.bisect_left(linkListFinder, l)
-                        if idx < len(linkListFinder) and linkListFinder[idx] == l :
+                        if idx < len(linkListFinder) and linkListFinder[idx] == l:
                             links.append(linkList[idx]['mainevent'])
                 if len(links) > 0: m['mainevent'].setLinkedEvents(links)
 
         return True
 
     def buildSet(self, board, sqlConn):
-        todo = "figure this out"
-        #maybe keep data here, cross-ref to tracks
-        #store sets + alltracks here, pointer to each track one inside track
+        """
+        Builds a set of candidate events for a given board and SQLite database connection.
 
-        #Initialize all Candidate objects
+        First, it initializes all candidate events for each track by creating a CandidateEvents object.
+        Then, it iterates by track, determining all possible candidate events.
+        For each pair of holes, it checks if the route is possible directly (i.e. if the two holes are on the same side of the track path).
+        If not, it checks if any intercepts occur by creating vectors from each hole to the other and checking if any of the track's holes intersect with those vectors.
+        If any intercepts occur, it checks if any of them are within the proximity threshold.
+        If any are, it adds them to the respective track's candidate events.
+
+        Finally, it calculates the final sets, for uniqueness, and inserts them into the TempCandidateEvents table in the SQLite database.
+
+        Parameters
+        ----------
+        board (Board): The board object to find candidate events for.
+        sqlConn (sqlite3.Connection): The connection to the SQLite database.
+
+        Returns
+        -------
+        None.
+        """
+        # TODO: figure this out
+        # maybe keep data here, cross-ref to tracks
+        # store sets + alltracks here, pointer to each track one inside track
+
+        # Initialize all Candidate objects
         np.seterr(all='raise')
         allHoles = set()
         for t in board.tracks:
@@ -147,13 +203,13 @@ class PossibleEvents:
         self.allTracksCandidateSet = CandidateEvents(allHoles)
         self.multiTrackCandidateSet = CandidateEvents(allHoles)
 
-        #Iterate, by track, determining all possible candidate events
+        # Iterate, by track, determining all possible candidate events
         for t in self.byTrackCandidateSets:
             holes = t.holes_l
-            #NOTE: no events on the last hole!
-            for h_a_idx in range(0, len(holes) -1):
+            # NOTE: no events on the last hole!
+            for h_a_idx in range(0, len(holes) - 1):
                 h_a = holes[h_a_idx]
-                for h_b_idx in range(h_a_idx+1, len(holes) -1):
+                for h_b_idx in range(h_a_idx + 1, len(holes) - 1):
                     h_b = holes[h_b_idx]
                     # if h_a.num == 5 and h_b.num == 30 and t.trackNum == 1:
                     #     p1 = np.array(h_a.coords)
@@ -179,10 +235,11 @@ class PossibleEvents:
                     #         # Calculate the angle in radians between the two vectors
                     #         angle_rad = np.arccos(dot_product)
                     #     angle_deg = np.degrees(angle_rad)
-                    #Determine if route is possible directly
+                    # Determine if route is possible directly
                     if not self.checkAngleForOrtho(self.eventAngleWithInstantSlope(h_a.coords,
-                                                                              holes[h_a_idx + 1].coords, h_b.coords)):
-                        #Check if any intercepts
+                                                                                   holes[h_a_idx + 1].coords,
+                                                                                   h_b.coords)):
+                        # Check if any intercepts
                         searchRect = self.cartesian_bounding_box(self.orthoBoundingBox((h_a.coords, h_b.coords)))
                         routePos = True
                         multiPos = True
@@ -195,11 +252,12 @@ class PossibleEvents:
                             if self.check_intersections({(h_a.coords, h_b.coords)}, intercVects, h_a, h_b, holesHit,
                                                         t_interc.trackNum):
                                 routePos = False
-                                tracksHit.extend([t_interc.trackNum]*len(holesHit))
+                                tracksHit.extend([t_interc.trackNum] * len(holesHit))
                                 holesHitAllTracks.extend(holesHit)
 
-                            if self.check_proximity_intersects(h_a, h_b, holesHit, t_interc.holes, t_interc.holeCoords_l,
-                                                           intercPoints):
+                            if self.check_proximity_intersects(h_a, h_b, holesHit, t_interc.holes,
+                                                               t_interc.holeCoords_l,
+                                                               intercPoints):
                                 # Check for proximity
                                 routePos = False
                                 multiPos = False
@@ -207,19 +265,19 @@ class PossibleEvents:
                         if routePos:
                             t.addCandidateEvent(CandidateEvent(t.trackNum, h_a, h_b, False))
                         elif multiPos and not t.trackNum in tracksHit:
-                            #Check to see if multi-track event possible
-                            #if contains only couples, we are good!
+                            # Check to see if multi-track event possible
+                            # if contains only couples, we are good!
                             tracksForExtension = []
                             tracksClosed = [t.trackNum]
                             eligibleForExtension = False
                             completeMulti = False
-                            #NOTE that if say we are on track 1 (inner) and there is an enclosing fold of say track 2
-                            #this multi-event will be picked up when we run track 2
+                            # NOTE that if say we are on track 1 (inner) and there is an enclosing fold of say track 2
+                            # this multi-event will be picked up when we run track 2
                             trackshit_cleaned = cp.deepcopy(tracksHit)
                             if len([h for h in holesHitAllTracks if h.lastHole]) == 0:
                                 for t_sub_num in list(set(tracksHit)):
                                     if tracksHit.count(t_sub_num) == 1:
-                                        #Track only hit once, elig for ext!
+                                        # Track only hit once, elig for ext!
                                         tracksForExtension.append(t_sub_num)
                                         eligibleForExtension = True
                                         completeMulti = False
@@ -228,7 +286,7 @@ class PossibleEvents:
                                         trackshit_cleaned = [t for t in trackshit_cleaned if t != t_sub_num]
                                         if not eligibleForExtension: completeMulti = True
                                     elif tracksHit.count(t_sub_num) > 2:
-                                        #Cannot ever hit track more than 2x!
+                                        # Cannot ever hit track more than 2x!
                                         eligibleForExtension = False
                                         completeMulti = False
                                         break
@@ -238,11 +296,11 @@ class PossibleEvents:
                             if eligibleForExtension:
                                 extensions = self.extend_line(h_a.coords, h_b.coords, gp.maxeventlineext)
                                 rects = self.create_extended_rectangles(h_a.coords, h_b.coords,
-                                                                                        gp.maxeventlineext)
+                                                                        gp.maxeventlineext)
                                 holesHitList_l = []
                                 # tracksSubset = [sub_t_c_set for sub_t_c_set in self.byTrackCandidateSets
                                 #                 if sub_t_c_set.trackNum not in tracksClosed]
-                                for l in range(0,2):
+                                for l in range(0, 2):
                                     holesHit = []
                                     for t_interc in self.byTrackCandidateSets:
                                         intercPoints = self.points_in_rectangle(t_interc.holeCoords_l, rects[l])
@@ -253,7 +311,7 @@ class PossibleEvents:
                                                                  t_interc.trackNum)
                                     holesHitList_l.append(self.ordered_by_proximity(holesHit, extensions[l][0]))
 
-                                #Trace along each ext, determine if can aquire symmetry
+                                # Trace along each ext, determine if can aquire symmetry
                                 extPos = True
                                 holesHitMultiList_l = [h_a, h_b]
                                 holesHitMultiList_l.extend(holesHitAllTracks)
@@ -262,71 +320,74 @@ class PossibleEvents:
                                 stuck = [False, False]
                                 while cnt[0] < mx[0] or cnt[1] < mx[1]:
                                     if len(tracksClosed) == len(self.board.tracks): break
-                                    for i in [0,1]:
+                                    for i in [0, 1]:
                                         if len(tracksClosed) == len(self.board.tracks): break
                                         if cnt[i] >= mx[i]:
                                             stuck[i] = True
                                         else:
                                             if (not holesHitMultiList_l[i].lastHole and
                                                     holesHitMultiList_l[i][cnt[i]].tracknum in tracksHit):
-                                                #Success!  We have closed a loop
+                                                # Success!  We have closed a loop
                                                 tracksHit.remove(holesHitList_l[i][cnt[i]].tracknum)
                                                 tracksClosed.append(holesHitList_l[i][cnt[i]].tracknum)
                                                 holesHitMultiList_l.append(holesHitList_l[i][cnt[i]])
                                                 mx[i] += 1
                                             elif len([s for s in stuck if s == True]) < 2:
                                                 if not stuck[i]:
-                                                    #Line now stuck, save this point for later
+                                                    # Line now stuck, save this point for later
                                                     stuck[i] = True
                                             else:
-                                                #Tracks all stuck, ext not possible
+                                                # Tracks all stuck, ext not possible
                                                 extPos = False
                                                 break
                                     if not extPos: break
 
                                 if extPos and len(tracksHit) == 0 and len(holesHitMultiList_l) % 2 == 0:
-                                    #Re-check proximity for new line trace
+                                    # Re-check proximity for new line trace
                                     full_line = self.find_longest_line([h.coords for h in holesHitMultiList_l])
                                     for t_interc in self.byTrackCandidateSets:
                                         if not extPos: break
                                         searchRect = self.cartesian_bounding_box(
                                             self.orthoBoundingBox((full_line[0], full_line[1])))
                                         intercPoints = self.points_in_rectangle(t_interc.holeCoords_l, searchRect)
-                                        if self.check_proximity_intersects(h_a, h_b, holesHitMultiList_l, t_interc.holes,
-                                                                           t_interc.holeCoords_l,intercPoints):
+                                        if self.check_proximity_intersects(h_a, h_b, holesHitMultiList_l,
+                                                                           t_interc.holes,
+                                                                           t_interc.holeCoords_l, intercPoints):
                                             extPos = False
-                                    #Ran the gauntlet and we are good!
+                                    # Ran the gauntlet and we are good!
                                     if extPos: self.addMultiTrackEvent(board, holesHitMultiList_l)
 
                             elif completeMulti:
-                                #Already completed multi! Woohoo!
+                                # Already completed multi! Woohoo!
                                 holesHitMultiList_l = cp.deepcopy(holesHitAllTracks)
                                 holesHitMultiList_l.extend([h_a, h_b])
                                 if len(holesHitMultiList_l) % 2 != 0:
-                                    sdfsd=""
+                                    sdfsd = ""
                                 self.addMultiTrackEvent(board, holesHitMultiList_l)
 
-#TODO: add in half-orthos, when direct to 1 but not the other
+                    # TODO: add in half-orthos, when direct to 1 but not the other
                     elif self.checkAngleForOrtho(self.eventAngleWithInstantSlope(h_b.coords, holes[h_b_idx - 1].coords,
-                                                                                  h_a.coords)):
+                                                                                 h_a.coords)):
                         # Determine if can otherwise route indirectly along orthogonal space either side of track path
                         curEvent = CandidateEvent(t.trackNum, h_a, h_b, True)
                         for rev in (False, True):
                             orthoVectsSearchAreas = list(self.smallest_enclosing_rectangle(h_a.coords, h_b.coords,
-                                                                      gp.maxloopyorthoeventdisplacementincrements
-                                                                      * gp.eventminspacing, rev))
+                                                                                           gp.maxloopyorthoeventdisplacementincrements
+                                                                                           * gp.eventminspacing, rev))
                             maxIncr = gp.maxloopyorthoeventdisplacementincrements
                             minIncr = 0
                             ortho = self.orthogonal_vector(h_a.coords, h_b.coords,
                                                            gp.maxloopyorthoeventdisplacementincrements
-                                                                  * gp.eventminspacing, rev)
+                                                           * gp.eventminspacing, rev)
                             for t_interc in self.byTrackCandidateSets:
                                 intercPoints = self.points_in_rectangle(t_interc.holeCoords_l, orthoVectsSearchAreas)
-                                intercVects = self.build_interception_test_vector_set(t_interc.holeCoords_l, intercPoints)
-                                floorIncr, testIncr, = self.test_sidestep_events(h_a, h_b, t_interc.holes, t_interc.holeCoords_l, ortho,
-                                                          gp.maxloopyorthoeventdisplacementincrements
-                                                                     * gp.eventminspacing,
-                                                          gp.eventminspacing, intercVects, rev)
+                                intercVects = self.build_interception_test_vector_set(t_interc.holeCoords_l,
+                                                                                      intercPoints)
+                                floorIncr, testIncr, = self.test_sidestep_events(h_a, h_b, t_interc.holes,
+                                                                                 t_interc.holeCoords_l, ortho,
+                                                                                 gp.maxloopyorthoeventdisplacementincrements
+                                                                                 * gp.eventminspacing,
+                                                                                 gp.eventminspacing, intercVects, rev)
                                 if testIncr < maxIncr: maxIncr = testIncr
                                 if floorIncr > minIncr: minIncr = floorIncr
                                 if maxIncr == 0: break
@@ -344,71 +405,74 @@ class PossibleEvents:
                         if curEvent.orthoFwdMaxIncr > 0 or curEvent.orthoRevMaxIncr > 0: t.addCandidateEvent(curEvent)
 
         # Calculate final sets, for uniqueness
-        timestamp =  dt.now().strftime('%m/%d/%y %H:%M:%S')
+        timestamp = dt.now().strftime('%m/%d/%y %H:%M:%S')
         for t in self.byTrackCandidateSets:
             t.removeDuplicates()
             curTrack_ID = self.board.getTrackByNum(t.trackNum).Track_ID
 
-            #Set into database temp table
+            # Set into database temp table
             deleteQuery = "DELETE FROM TempCandidateEvents WHERE Board_ID = ? AND Track_ID = ?"
             sqlConn.execute(deleteQuery, (self.board.boardID,
-                                               self.board.getTrackByNum(t.trackNum).Track_ID))
+                                          self.board.getTrackByNum(t.trackNum).Track_ID))
 
-            #Retrieve columns into empty dataframe
+            # Retrieve columns into empty dataframe
             query = "SELECT * FROM TempCandidateEvents WHERE 1 = 0"
             sqliteCursor = sqlConn.cursor()
             sqliteCursor.execute(query)
             candidateEvents_df = pd.DataFrame.from_records([[None for d in sqliteCursor.description]]
-                                                           *len(t.candidateEvents),
-                                              columns=[d[0] for d in sqliteCursor.description])
+                                                           * len(t.candidateEvents),
+                                                           columns=[d[0] for d in sqliteCursor.description])
 
-            #Pop dataframe
+            # Pop dataframe
             for e_idx in range(0, len(candidateEvents_df)):
                 candidateEvents_df.loc[e_idx]['Board_ID'] = self.board.boardID
-                candidateEvents_df.loc[e_idx]['Track_ID'] =  curTrack_ID
-                candidateEvents_df.loc[e_idx]['CandidateEvent_ID'] =  t.candidateEvents[e_idx].db_hash
-                candidateEvents_df.loc[e_idx]['FinderHash'] = (10E6*t.candidateEvents[e_idx].trackNum
-                                                               +10E3*t.candidateEvents[e_idx].startHole.num
+                candidateEvents_df.loc[e_idx]['Track_ID'] = curTrack_ID
+                candidateEvents_df.loc[e_idx]['CandidateEvent_ID'] = t.candidateEvents[e_idx].db_hash
+                candidateEvents_df.loc[e_idx]['FinderHash'] = (10E6 * t.candidateEvents[e_idx].trackNum
+                                                               + 10E3 * t.candidateEvents[e_idx].startHole.num
                                                                + t.candidateEvents[e_idx].endHole.num)
-                candidateEvents_df.loc[e_idx]['Timestamp'] =   timestamp
-                candidateEvents_df.loc[e_idx]['trackNum'] =t.candidateEvents[e_idx].trackNum
-                candidateEvents_df.loc[e_idx]['startHole'] =t.candidateEvents[e_idx].startHole.num
-                candidateEvents_df.loc[e_idx]['endHole'] =t.candidateEvents[e_idx].endHole.num
-                candidateEvents_df.loc[e_idx]['midPointNum'] =t.candidateEvents[e_idx].midPointNum
-                candidateEvents_df.loc[e_idx]['crowVector'] =("{};{}"
-                .format(",".join([str(c) for c in t.candidateEvents[e_idx].crowVector[0]])
-                        , ",".join([str(c) for c in t.candidateEvents[e_idx]
-                                   .crowVector[1]])))
-                candidateEvents_df.loc[e_idx]['length'] =t.candidateEvents[e_idx].length
-                candidateEvents_df.loc[e_idx]['canBeLadder'] =t.candidateEvents[e_idx].canBeLadder
-                candidateEvents_df.loc[e_idx]['isOrtho'] =t.candidateEvents[e_idx].isOrtho
-                candidateEvents_df.loc[e_idx]['orthoVector'] =  ("{},{}"
-                                                              .format(t.candidateEvents[e_idx].orthoVector[0],
-                                                                      t.candidateEvents[e_idx].orthoVector[1]))
-                candidateEvents_df.loc[e_idx]['orthoFwdMinIncr'] =t.candidateEvents[e_idx].orthoFwdMinIncr
-                candidateEvents_df.loc[e_idx]['orthoRevMinIncr'] =t.candidateEvents[e_idx].orthoRevMinIncr
-                candidateEvents_df.loc[e_idx]['orthoFwdMaxIncr'] =t.candidateEvents[e_idx].orthoFwdMaxIncr
-                candidateEvents_df.loc[e_idx]['orthoRevMaxIncr'] =t.candidateEvents[e_idx].orthoRevMaxIncr
+                candidateEvents_df.loc[e_idx]['Timestamp'] = timestamp
+                candidateEvents_df.loc[e_idx]['trackNum'] = t.candidateEvents[e_idx].trackNum
+                candidateEvents_df.loc[e_idx]['startHole'] = t.candidateEvents[e_idx].startHole.num
+                candidateEvents_df.loc[e_idx]['endHole'] = t.candidateEvents[e_idx].endHole.num
+                candidateEvents_df.loc[e_idx]['midPointNum'] = t.candidateEvents[e_idx].midPointNum
+                candidateEvents_df.loc[e_idx]['crowVector'] = ("{};{}"
+                                                               .format(
+                    ",".join([str(c) for c in t.candidateEvents[e_idx].crowVector[0]])
+                    , ",".join([str(c) for c in t.candidateEvents[e_idx]
+                               .crowVector[1]])))
+                candidateEvents_df.loc[e_idx]['length'] = t.candidateEvents[e_idx].length
+                candidateEvents_df.loc[e_idx]['canBeLadder'] = t.candidateEvents[e_idx].canBeLadder
+                candidateEvents_df.loc[e_idx]['isOrtho'] = t.candidateEvents[e_idx].isOrtho
+                candidateEvents_df.loc[e_idx]['orthoVector'] = ("{},{}"
+                                                                .format(t.candidateEvents[e_idx].orthoVector[0],
+                                                                        t.candidateEvents[e_idx].orthoVector[1]))
+                candidateEvents_df.loc[e_idx]['orthoFwdMinIncr'] = t.candidateEvents[e_idx].orthoFwdMinIncr
+                candidateEvents_df.loc[e_idx]['orthoRevMinIncr'] = t.candidateEvents[e_idx].orthoRevMinIncr
+                candidateEvents_df.loc[e_idx]['orthoFwdMaxIncr'] = t.candidateEvents[e_idx].orthoFwdMaxIncr
+                candidateEvents_df.loc[e_idx]['orthoRevMaxIncr'] = t.candidateEvents[e_idx].orthoRevMaxIncr
                 if t.candidateEvents[e_idx].sharedWithTracks not in (None, -1, 0):
-                    candidateEvents_df.loc[e_idx]['sharedWithTracks'] =",".join([str(sh) for sh in
-                                                                                 t.candidateEvents[e_idx].sharedWithTracks])
-                candidateEvents_df.loc[e_idx]['sharedSubHash'] =t.candidateEvents[e_idx].sharedSubHash
-                candidateEvents_df.loc[e_idx]['instanceIncr'] =t.candidateEvents[e_idx].instanceIncr
-                candidateEvents_df.loc[e_idx]['instanceRev'] =t.candidateEvents[e_idx].instanceRev
+                    candidateEvents_df.loc[e_idx]['sharedWithTracks'] = ",".join([str(sh) for sh in
+                                                                                  t.candidateEvents[
+                                                                                      e_idx].sharedWithTracks])
+                candidateEvents_df.loc[e_idx]['sharedSubHash'] = t.candidateEvents[e_idx].sharedSubHash
+                candidateEvents_df.loc[e_idx]['instanceIncr'] = t.candidateEvents[e_idx].instanceIncr
+                candidateEvents_df.loc[e_idx]['instanceRev'] = t.candidateEvents[e_idx].instanceRev
                 if t.candidateEvents[e_idx].linkedEvents is not None and len(t.candidateEvents[e_idx].linkedEvents) > 0:
-                    candidateEvents_df.loc[e_idx]['linkedEvent1'] = (10E6 * t.candidateEvents[e_idx].linkedEvents[0].trackNum
-                     + 10E3 * t.candidateEvents[e_idx].linkedEvents[0].startHole.num
-                     + t.candidateEvents[e_idx].linkedEvents[0].endHole.num)
-
+                    candidateEvents_df.loc[e_idx]['linkedEvent1'] = (
+                                10E6 * t.candidateEvents[e_idx].linkedEvents[0].trackNum
+                                + 10E3 * t.candidateEvents[e_idx].linkedEvents[0].startHole.num
+                                + t.candidateEvents[e_idx].linkedEvents[0].endHole.num)
 
                 if t.candidateEvents[e_idx].linkedEvents is not None and len(t.candidateEvents[e_idx].linkedEvents) > 1:
-                    candidateEvents_df.loc[e_idx]['linkedEvent2'] = (10E6 * t.candidateEvents[e_idx].linkedEvents[1].trackNum
-                     + 10E3 * t.candidateEvents[e_idx].linkedEvents[1].startHole.num
-                     + t.candidateEvents[e_idx].linkedEvents[1].endHole.num)
-                candidateEvents_df.loc[e_idx]['isShared'] =t.candidateEvents[e_idx].isShared
+                    candidateEvents_df.loc[e_idx]['linkedEvent2'] = (
+                                10E6 * t.candidateEvents[e_idx].linkedEvents[1].trackNum
+                                + 10E3 * t.candidateEvents[e_idx].linkedEvents[1].startHole.num
+                                + t.candidateEvents[e_idx].linkedEvents[1].endHole.num)
+                candidateEvents_df.loc[e_idx]['isShared'] = t.candidateEvents[e_idx].isShared
 
-            #Insert into data table
-            #TODO: round off coords & vectors!
+            # Insert into data table
+            # TODO: round off coords & vectors!
             candidateEvents_df_m = candidateEvents_df.values.tolist()
             candQuery_sb = StringIO()
             candQuery_sb.write("INSERT INTO TempCandidateEvents(")
@@ -416,23 +480,35 @@ class PossibleEvents:
             for c in range(0, len(cols) - 1):
                 candQuery_sb.write(cols[c])
                 candQuery_sb.write(", ")
-            candQuery_sb.write(cols[len(cols)-1])
+            candQuery_sb.write(cols[len(cols) - 1])
             candQuery_sb.write(") VALUES (")
-            candQuery_sb.write(", ".join(['?']*len(cols)))
+            candQuery_sb.write(", ".join(['?'] * len(cols)))
             candQuery_sb.write(")")
             sqliteCursor.executemany(candQuery_sb.getvalue(), candidateEvents_df_m)
             sqlConn.commit()
             candQuery_sb.close()
 
-
     def addMultiTrackEvent(self, board, holesHitMultiList_l):
+        """
+        Add a multi-track event to the board.
+
+        This method takes a list of holes hit in multiple tracks and adds a candidate event
+        to each track. It also sets up linked events between the different tracks.
+
+        Parameters:
+            board (board): The board object to add the multi-track event to.
+            holesHitMultiList_l (list): A list of holes hit in multiple tracks.
+
+        Returns:
+            None
+        """
         linkedEventsSet = []
         hole_vectors = []
 
         holesHitMultiList_l.sort(key=lambda h: (h.tracknum, h.num))
 
-        for h in range(0,len(holesHitMultiList_l),2):
-           hole_vectors.append((holesHitMultiList_l[h], holesHitMultiList_l[h+1]))
+        for h in range(0, len(holesHitMultiList_l), 2):
+            hole_vectors.append((holesHitMultiList_l[h], holesHitMultiList_l[h + 1]))
 
         for hole_vector in hole_vectors:
             sharedWithTracks = [v[0].tracknum for v in hole_vectors if v[0].tracknum != hole_vector[0].tracknum]
@@ -442,7 +518,7 @@ class PossibleEvents:
             currTrack.candidateEvents.addCandidateEvent(currMultiCand)
             linkedEventsSet.append(currMultiCand)
 
-        #set up links
+        # set up links
         if len(linkedEventsSet) > 1:
             linkedEventsSet.sort(key=lambda m: m.trackNum)
             for linkedEvent in linkedEventsSet:
@@ -469,6 +545,25 @@ class PossibleEvents:
         # See https://www.geeksforgeeks.org/orientation-3-ordered-points/amp/  
         # for details of below formula.  
 
+        """
+        Finds the orientation of an ordered triplet (p,q,r).
+
+        Returns one of the following values:
+        0 : Collinear points
+        1 : Clockwise points
+        2 : Counterclockwise
+
+        See https://www.geeksforgeeks.org/orientation-3-ordered-points/amp/
+        for details of the formula used.
+
+        Parameters
+        ----------
+        p, q, r (tuple): Coordinates of the three points in the format (x, y).
+
+        Returns
+        -------
+        int: The orientation of the three points.
+        """
         val = (float(q[1] - p[1]) * (r[0] - q[0])) - (float(q[0] - p[0]) * (r[1] - q[1]))
         if (val > 0):
 
@@ -489,6 +584,17 @@ class PossibleEvents:
 
         # Find the 4 orientations required for  
         # the general and special cases 
+        """
+        Checks if two line segments intersect.
+
+        Parameters
+        ----------
+        p1, q1, p2, q2 (tuple): Coordinates of the four points in the format (x, y).
+
+        Returns
+        -------
+        bool: True if the line segments intersect, False otherwise.
+        """
         o1 = self.orientation(p1, q1, p2)
         o2 = self.orientation(p1, q1, q2)
         o3 = self.orientation(p2, q2, p1)
@@ -525,9 +631,9 @@ class PossibleEvents:
         return (self.ccw(vec1[0], vec2[0], vec2[1]) != self.ccw(vec1[1], vec2[0], vec2[1]) and
                 self.ccw(vec1[0], vec1[1], vec2[0]) != self.ccw(vec1[0], vec1[1], vec2[1]))
 
-    def check_intersections(self, test_path_set, possible_intercepts_set, h_a=(-1,-1), h_b=(-1,-1),
-                            holesHit = None, trackNum = -1, closestPoint = -1, testOrthos = False,
-                            fwdOrthosTest = False, postGenTest = False):
+    def check_intersections(self, test_path_set, possible_intercepts_set, h_a=(-1, -1), h_b=(-1, -1),
+                            holesHit=None, trackNum=-1, closestPoint=-1, testOrthos=False,
+                            fwdOrthosTest=False, postGenTest=False):
         """
         Check if any vector in test_path_set intersects with any vector in possible_intercepts_set.
 
@@ -541,10 +647,10 @@ class PossibleEvents:
         for vector1 in test_path_set:
             for vector2 in possible_intercepts_set:
                 if not postGenTest and (vector1[0] == vector2[0] or vector1[0] == vector2[1] or
-                                vector1[1] == vector2[0] or vector1[1] == vector2[1]): continue
+                                        vector1[1] == vector2[0] or vector1[1] == vector2[1]): continue
                 if vector1 != vector2 and vector2[0] not in [h_a, h_b] and self.intersect(vector1, vector2):
                     if holesHit is None:
-                        #If testing orthos, omit touching nodes
+                        # If testing orthos, omit touching nodes
                         closestPoint = vector1[0]
                         return True
                     else:
@@ -604,7 +710,7 @@ class PossibleEvents:
         Returns:
             List of tuples: Each tuple represents a vector from one point to another.
         """
-         # Omit designated points & build base vector set
+        # Omit designated points & build base vector set
         subset_omitted = cp.deepcopy(subset)
 
         for c in subset_omit:
@@ -620,8 +726,30 @@ class PossibleEvents:
         return prox_vectors
 
     def check_proximity_intersects(self, h_a, h_b, holesHit, holes, pertinentHoleCoords_l, intercPoints,
-                                   orthoVects = None):
+                                   orthoVects=None):
         # Check for proximity
+        """
+        Check for proximity intersects between two holes, h_a and h_b.
+
+        Given two holes, h_a and h_b, a list of holes, holesHit, that have been hit,
+        and a list of pertinent hole coordinates, pertinentHoleCoords_l, and a list
+        of intersection points, intercPoints, check if any of the proximity vectors
+        between the holes and the intersection points intersect with the proximity
+        vectors between the holes and the pertinent hole coordinates.
+
+        Parameters
+        ----------
+        h_a, h_b (Hole): The two holes to check for proximity intersects.
+        holesHit (list of Holes): The list of holes that have been hit.
+        holes (list of Holes): The list of all holes.
+        pertinentHoleCoords_l (list of tuples): The list of pertinent hole coordinates.
+        intercPoints (list of tuples): The list of intersection points.
+        orthoVects (list of tuples): The list of orthogonally projected vectors.
+
+        Returns
+        -------
+        bool: True if any proximity vectors intersect, False otherwise.
+        """
         proxVectsOmit = []
         proxVectsIndices = []
         if h_a.tracknum == holes[0].tracknum:
@@ -645,16 +773,26 @@ class PossibleEvents:
         return False
 
     def boundingBoxForVector(self, vector):
+        """
+        Creates a bounding box for a given vector.
+
+        Parameters:
+            vector (tuple): A tuple of two points defining the vector.
+
+        Returns:
+            set of tuples: A set of tuples, each containing two points defining the sides of the bounding box.
+
+        """
         intersects = []
         cornersPlusMainPoints = self.orthoBoundingBox(vector)
         numPoints = len(cornersPlusMainPoints)
-        for i in range(0,numPoints):
-            intersects.append((cornersPlusMainPoints[i], cornersPlusMainPoints[(i+1)%numPoints]))
+        for i in range(0, numPoints):
+            intersects.append((cornersPlusMainPoints[i], cornersPlusMainPoints[(i + 1) % numPoints]))
         return set(tuple(intersects))
 
     def test_sidestep_events(self, h_a, h_b, holes, holeCoords_l, orthogonal_vector, max_ortho_length, increment,
-                             possible_intercepts_set, reverse, minIncr = -1, maxIncr = -1, ignoreProximity = False,
-                             debugTest = False):
+                             possible_intercepts_set, reverse, minIncr=-1, maxIncr=-1, ignoreProximity=False,
+                             debugTest=False):
         """
         Calculate the lines incrementally from the given points following the orthogonal vector.
 
@@ -671,16 +809,16 @@ class PossibleEvents:
             int: min number of increments for potential paths
             int: max number of increments for potential paths
         """
-        #TODO: incorpoarte half-ortho, where one side ortho other diurect
-        #TODO: maybe play with triangular stright line approximations if both sides ortho?
-            #Would need to much w/ proximity sensing in this case!
+        # TODO: incorpoarte half-ortho, where one side ortho other diurect
+        # TODO: maybe play with triangular stright line approximations if both sides ortho?
+        # Would need to much w/ proximity sensing in this case!
         if debugTest:
             sfds = ""
         total_increments = int(max_ortho_length / increment)
         lines = []
         point1 = h_a.coords
         point2 = h_b.coords
-        midpoint = tuple([sum(c)/2 for c in zip(point1, point2)])
+        midpoint = tuple([sum(c) / 2 for c in zip(point1, point2)])
         validIncrs = []
 
         incrStart, incrStop = 1, total_increments
@@ -690,13 +828,13 @@ class PossibleEvents:
         for i in range(incrStart, incrStop + 1):
             # Calculate the incremented length
             current_length = increment * i
-            length_divider = current_length/max_ortho_length
+            length_divider = current_length / max_ortho_length
 
             # Calculate triangle peak point based on the orthogonal vector
             peak_point = (midpoint[0] + orthogonal_vector[0] * length_divider,
                           midpoint[1] + orthogonal_vector[1] * length_divider)
 
-            #Check if valid
+            # Check if valid
             if (peak_point[0] < 0 or peak_point[0] > self.board.width or
                     peak_point[1] < 0 or peak_point[1] > self.board.height):
                 break
@@ -711,13 +849,15 @@ class PossibleEvents:
             if (not self.check_intersections(test_set, possible_intercepts_set, postGenTest=ignoreProximity,
                                              testOrthos=True)
                     and (ignoreProximity or not self.check_proximity_intersects(h_a, h_b, [], holes,
-                                               holeCoords_l, [c[0] for c in possible_intercepts_set], test_set))):
-                #Success! This is a valid incr
+                                                                                holeCoords_l,
+                                                                                [c[0] for c in possible_intercepts_set],
+                                                                                test_set))):
+                # Success! This is a valid incr
                 validIncrs.append(i)
 
         minIncr, maxIncr, prevIncr = 0, 0, 0
         if len(validIncrs) > 0:
-            minIncr, maxIncr, prevIncr = validIncrs[0],validIncrs[0],validIncrs[0]
+            minIncr, maxIncr, prevIncr = validIncrs[0], validIncrs[0], validIncrs[0]
 
             if len(validIncrs) > 1:
                 for incr in validIncrs[1:]:
@@ -730,6 +870,18 @@ class PossibleEvents:
         return minIncr, maxIncr
 
     def testPlotVectorsOnHoles(self, vectors):
+        """
+        Plots multiple vectors on the board's hole positions.
+
+        Parameters:
+            vectors (list of tuples): List of vectors to plot, where each vector is a tuple of two points (start, end).
+
+        Displays an interactive plot using matplotlib. The plot includes:
+            - Hole positions as points
+            - Track numbers and hole numbers as labels
+            - The input vectors as lines
+
+        """
         plt.figure(figsize=(15, 10))
         for vector in vectors:
             x_values = [vector[0][0], vector[1][0]]
@@ -743,6 +895,7 @@ class PossibleEvents:
 
         plt.show()
         plt.waitforbuttonpress()
+
     def midpoint(self, point1, point2):
         """
         Calculate the midpoint between two points.
@@ -775,19 +928,18 @@ class PossibleEvents:
         orthogonal_dy = dx
         magnitude = math.sqrt(orthogonal_dx ** 2 + orthogonal_dy ** 2)
 
-        #Return nil if magnitude is zero
+        # Return nil if magnitude is zero
         if magnitude == 0:
-            return 0,0
+            return 0, 0
 
         # Scale to the desired length
         orthogonal_dx = (orthogonal_dx / magnitude) * length
         orthogonal_dy = (orthogonal_dy / magnitude) * length
 
-        #Flip direction if rev
+        # Flip direction if rev
         if reverse:
             orthogonal_dx *= -1
             orthogonal_dy *= -1
-
 
         return orthogonal_dx, orthogonal_dy
 
@@ -812,8 +964,8 @@ class PossibleEvents:
         # ortho_point1 = (mid[0] + orthogonal_dx / 2, mid[1] + orthogonal_dy / 2)
         # ortho_point2 = (mid[0] - orthogonal_dx / 2, mid[1] - orthogonal_dy / 2)
 
-        #Extend out p1 & p2 to widen search box
-        (ext1, ext2) = self.extend_line(point1, point2, gp.eventminspacing/2)
+        # Extend out p1 & p2 to widen search box
+        (ext1, ext2) = self.extend_line(point1, point2, gp.eventminspacing / 2)
         extp1, extp2 = ext1[1], ext2[1]
         ortho_vec1 = (extp1, [p + o for p, o in zip(extp1, ortho_dxdy)])
         ortho_vec2 = (extp2, [p + o for p, o in zip(extp2, ortho_dxdy)])
@@ -830,6 +982,7 @@ class PossibleEvents:
 
         # return self.determine_rectangle_corners((min_x, min_y), (max_x, max_y))
         return self.cartesian_bounding_box(tuple(orthoboundpoints))
+
     def calculate_distance(self, point1, point2):
         """
         Calculate the Euclidean distance between two points.
@@ -866,6 +1019,7 @@ class PossibleEvents:
         max_distance = self.calculate_distance(p1, p2)
 
         return (p1, p2)
+
     def ordered_by_proximity(self, holes, reference_point):
         """
         Order a set of coordinates by their proximity to a given reference point.
@@ -922,7 +1076,7 @@ class PossibleEvents:
         # Extend the line in both directions
         extended_p1, extended_p2 = self.extend_line(p1, p2, distance)
 
-        #Determine bounding boxes
+        # Determine bounding boxes
         rect1_corners = self.cartesian_bounding_box(self.orthoBoundingBox((p1, extended_p1[1])))
         rect2_corners = self.cartesian_bounding_box(self.orthoBoundingBox((p2, extended_p2[1])))
 
@@ -933,9 +1087,18 @@ class PossibleEvents:
         return [rect1_corners, rect2_corners]
 
     def orthoBoundingBox(self, vector):
+        """
+        Calculate the bounding box of a vector.
+
+        Parameters:
+            vector (tuple of tuples): A vector, defined by two points.
+
+        Returns:
+            tuple: A tuple containing four tuples, each representing a corner of the bounding box.
+        """
         ortho_dxdy = self.orthogonal_vector(vector[0], vector[1], gp.eventminspacing / 2.0, False)
         revOrtho_dxdy = [(-1) * d for d in ortho_dxdy]
-        midpoint =  tuple(sum(c)/2 for c in zip(vector[0], vector[1]))
+        midpoint = tuple(sum(c) / 2 for c in zip(vector[0], vector[1]))
         corners = [vector[0], tuple(sum(c) for c in zip(midpoint, ortho_dxdy))]
         corners.extend([vector[1], tuple(sum(c) for c in zip(midpoint, revOrtho_dxdy))])
         return tuple(corners)
@@ -963,7 +1126,7 @@ class PossibleEvents:
         min_y = min(y_coords)
         max_y = max(y_coords)
 
-        #Increase by 10 for safety
+        # Increase by 10 for safety
         min_x -= 10
         max_x += 10
         min_y -= 10
@@ -976,8 +1139,6 @@ class PossibleEvents:
         top_left = (min_x, max_y)
 
         return [bottom_left, bottom_right, top_right, top_left]
-
-
 
     def determine_rectangle_corners(self, p1, p2):
         """
@@ -1002,6 +1163,18 @@ class PossibleEvents:
 
     def eventAngleWithInstantSlope(self, point, nextPoint, eventPoint):
         # Convert points to numpy arrays
+        """
+        Calculate the angle in degrees between the instant slope at a given point and the
+        line segment between the given point and the next point.
+
+        Parameters:
+            point (tuple): The point at which to calculate the angle, in the format (x, y).
+            nextPoint (tuple): The next point in the sequence, in the format (x, y).
+            eventPoint (tuple): The point at which the event occurred, in the format (x, y).
+
+        Returns:
+            float: The angle in degrees between the two vectors.
+        """
         p1 = np.array(point)
         p2 = np.array(nextPoint)
         p3 = np.array(eventPoint)
@@ -1017,7 +1190,7 @@ class PossibleEvents:
         # Calculate the dot product and magnitudes
         dot_product = np.dot(unit_v1, unit_v2)
         if dot_product > 1.0:
-            #Rounding error??? this means vectors are parallel, 0 deg
+            # Rounding error??? this means vectors are parallel, 0 deg
             angle_rad = 0
         elif dot_product < -1.0:
             angle_rad = math.pi
@@ -1052,15 +1225,25 @@ class PossibleEvents:
         return list(map(tuple, points_ar[inside]))
 
     def checkAngleForOrtho(self, angle_deg):
+        """
+        Checks if an angle is suitable for an orthogonal event.
+
+        Parameters:
+            angle_deg (float): The angle in degrees to check.
+
+        Returns:
+            bool: True if the angle is suitable, False otherwise.
+        """
         angle_deg_controlled = (360 + angle_deg) % 360
         if (angle_deg_controlled >= gp.minanglefromtracktangent and
-                angle_deg_controlled <= (180-gp.minanglefromtracktangent)): return False
+                angle_deg_controlled <= (180 - gp.minanglefromtracktangent)): return False
         if (angle_deg_controlled >= 180 + gp.minanglefromtracktangent and
-                angle_deg_controlled <= (360-gp.minanglefromtracktangent)): return False
+                angle_deg_controlled <= (360 - gp.minanglefromtracktangent)): return False
         return True
 
+
 class CandidateEvents:
-    def __init__(self, holes, trackNum = -1):
+    def __init__(self, holes, trackNum=-1):
         self.trackNum = trackNum
         self.holes = holes
         self.holes_l = list(holes)
@@ -1075,18 +1258,38 @@ class CandidateEvents:
     def removeDuplicates(self):
         self.candidateEvents = list(set(self.candidateEvents))
 
+
 class CandidateEvent:
     def __init__(self, trackNum, startHole, endHole, isOrtho,
                  orthoFwdMinIncr=0, orthoRevMinIncr=0, orthoFwdMaxIncr=0, orthoRevMaxIncr=0,
-                 orthoVector = (-1,-1),
-                 sharedWithTracks = None, linkedEvents = None):
+                 orthoVector=(-1, -1),
+                 sharedWithTracks=None, linkedEvents=None):
+        """
+        Initialize a CandidateEvent object.
+
+        Parameters:
+            trackNum (int): The track number that this event is associated with.
+            startHole (Hole): The starting hole of the event.
+            endHole (Hole): The ending hole of the event.
+            isOrtho (bool): True if the event is an orthogonal event, False otherwise.
+            orthoFwdMinIncr (int): The minimum increment value for an orthogonal event in the forward direction.
+            orthoRevMinIncr (int): The minimum increment value for an orthogonal event in the reverse direction.
+            orthoFwdMaxIncr (int): The maximum increment value for an orthogonal event in the forward direction.
+            orthoRevMaxIncr (int): The maximum increment value for an orthogonal event in the reverse direction.
+            orthoVector (tuple): The vector of the orthogonal event.
+            sharedWithTracks (list of int): List of track numbers that this event is shared with.
+            linkedEvents (list of CandidateEvent): List of events that are linked to this event.
+
+        Returns:
+            None
+        """
         self.db_hash = -1
         self.eventID = -1
         self.linkFinderHash = -1
         self.trackNum = trackNum
         self.startHole = startHole
         self.endHole = endHole
-        self.midPointNum = (startHole.num + endHole.num)/2
+        self.midPointNum = (startHole.num + endHole.num) / 2
         self.crowVector = (startHole.coords, endHole.coords)
         self.crowLength = self.calculate_distance(*self.crowVector)
         self.length = self.endHole.num - self.startHole.num
@@ -1101,15 +1304,15 @@ class CandidateEvent:
         self.sharedSubHash = 0
         self.instanceIncr = -1
         self.instanceRev = False
-        self.instanceStartVector = ((-1,-1),(-1,-1))
-        self.instanceEndVector = ((-1,-1),(-1,-1))
-        self.instanceLump = (-1,-1)
+        self.instanceStartVector = ((-1, -1), (-1, -1))
+        self.instanceEndVector = ((-1, -1), (-1, -1))
+        self.instanceLump = (-1, -1)
         self.instanceIsChute = True
         self.instanceIsLadder = self.canBeLadder
         self.instanceCancel = False
         if self.sharedWithTracks is not None:
             for s in range(0, len(self.sharedWithTracks)):
-                self.sharedSubHash += self.sharedWithTracks[s]*(pow(10,s))
+                self.sharedSubHash += self.sharedWithTracks[s] * (pow(10, s))
         self.linkedEvents = linkedEvents
         self.isShared = self.sharedWithTracks is not None
 
@@ -1147,9 +1350,21 @@ class CandidateEvent:
         return self.sharedSubHash < other.sharedSubHash
 
     def setLinkedEvents(self, linkedEvents):
+        """
+        Sets the linked events for a candidate event.
+
+        Parameters:
+            linkedEvents (list of CandidateEvent): List of events that are linked to this event.
+
+        Returns:
+            None
+
+        Notes:
+            This method updates the linked events, shared track numbers, shared sub-hash, and shared status of the event.
+        """
         self.linkedEvents = linkedEvents
         self.sharedWithTracks = [e.trackNum for e in self.linkedEvents]
-        #NOTE: this WILL NOT RECOMPUTE THE HASH
+        # NOTE: this WILL NOT RECOMPUTE THE HASH
         self.sharedSubHash = 0
         for s in range(0, len(self.sharedWithTracks)):
             self.sharedSubHash += self.sharedWithTracks[s] * (pow(10, s))

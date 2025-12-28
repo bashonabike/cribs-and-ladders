@@ -17,9 +17,46 @@ from io import StringIO
 import os
 from collections import defaultdict
 
+
 class Stats:
 
     def __init__(self, board, squad, optimizerRunSet, optimizerRun):
+        """
+        Initialize the statistics object.
+
+        Args:
+            board: The Board object to evaluate.
+            squad: The CribSquad object containing the players to evaluate.
+            optimizerRunSet: The identifier for the current optimizer run set.
+            optimizerRun: The identifier for the current optimizer run.
+
+        Attributes:
+            moves (list): A list of moves made in the games.
+            partialBalanceSet (list): A list of partial balance values by player.
+            chutesbytrack (list): A list of chutes by track.
+            laddersbytrack (list): A list of ladders by track.
+            eventsbytrack (list): A list of events by track.
+            ladders (int): The total number of ladders.
+            chutes (int): The total number of chutes.
+            events (int): The total number of events.
+            laddersin1bytrack (list): A list of ladders in track 1 by player.
+            laddersin2bytrack (list): A list of ladders in track 2 by player.
+            chutesin1bytrack (list): A list of chutes in track 1 by player.
+            chutesin2bytrack (list): A list of chutes in track 2 by player.
+            eventin1bytrack (list): A list of events in track 1 by player.
+            eventin2bytrack (list): A list of events in track 2 by player.
+            laddersin1 (int): The total number of ladders in track 1.
+            laddersin2 (int): The total number of ladders in track 2.
+            chutesin1 (int): The total number of chutes in track 1.
+            chutesin2 (int): The total number of chutes in track 2.
+            eventin1 (int): The total number of events in track 1.
+            eventin2 (int): The total number of events in track 2.
+            soexcitespeggingbytrack (list): A list of soexcites pegging by track.
+            repeats (int): The total number of repeats.
+            avglengthinrounds (int): The average length of games in rounds.
+            hist_df (DataFrame): A DataFrame containing the histogram of lengths.
+            hist_by_track_df (DataFrame): A DataFrame containing the histogram of lengths by track.
+        """
         self.board = board
         self.squad = squad
         self.optimizerRunSet = optimizerRunSet
@@ -41,13 +78,13 @@ class Stats:
         self.chutesin1bytrack = []
         self.chutesin2bytrack = []
         self.eventsin1bytrack = []
-        self.eventsin2bytrack = []        
+        self.eventsin2bytrack = []
         self.laddersin1 = 0
         self.laddersin2 = 0
-        self.chutesin1 =  0
-        self.chutesin2 =  0
-        self.eventsin1 =  0
-        self.eventsin2 =  0
+        self.chutesin1 = 0
+        self.chutesin2 = 0
+        self.eventsin1 = 0
+        self.eventsin2 = 0
 
         self.soexcitespeggingbytrack = []
         self.repeatsbytrack = []
@@ -59,8 +96,7 @@ class Stats:
         self.hist_df = None
         self.hist_by_track_df = None
 
-
-    #slice & dice data at end of trials, group by trial to compute stuff pointwise per trial
+    # slice & dice data at end of trials, group by trial to compute stuff pointwise per trial
     # def addMoveStat(self, trial, track, moveNum, round, playerNum, oldScore, baseScore, reason, event, newScore, soexcite):
     #     eventAmt = newScore- oldScore - baseScore
     #     curMove = Move()
@@ -99,6 +135,15 @@ class Stats:
     #     self.moves.append(curMove)
 
     def clearStatsAndSetMoves(self, curMoveSet):
+        """
+        Resets all statistics and sets the current set of moves.
+
+        Args:
+            curMoveSet (list): A list of moves made in the games.
+
+        Returns:
+            None
+        """
         self.partialBalanceSet = []
 
         self.chutesbytrack = []
@@ -116,10 +161,10 @@ class Stats:
         self.eventsin2bytrack = []
         self.laddersin1 = 0
         self.laddersin2 = 0
-        self.chutesin1 =  0
-        self.chutesin2 =  0
-        self.eventsin1 =  0
-        self.eventsin2 =  0
+        self.chutesin1 = 0
+        self.chutesin2 = 0
+        self.eventsin1 = 0
+        self.eventsin2 = 0
 
         self.soexcitespeggingbytrack = []
         self.repeatsbytrack = []
@@ -135,6 +180,15 @@ class Stats:
 
     def calc_metrics(self):
         # Build dataframes & indices
+
+        """
+        Calculate statistics on the given moves.
+
+        Parameters:
+            moves (list): A list of Move objects to calculate statistics on.
+        Returns:
+            None
+        """
         moves_df = pd.DataFrame.from_records([m.to_dict() for m in self.moves])
         # print("Liklihood given hole hit: " + str(len(self.moves)/(gp.numplayers*gp.effectiveboardlength*gp.numtrials)))
         # max_rounds_per_trial = defaultdict(int)
@@ -163,22 +217,21 @@ class Stats:
         chutes_df = pd.concat([t.getChutesAsDF() for t in self.board.tracks])
         events_df = pd.concat([t.getEventsAsDF() for t in self.board.tracks])
 
-
-        #set up chutes & ladder df's if none defined in input
+        # set up chutes & ladder df's if none defined in input
         if ladders_df.columns is None or len(ladders_df.columns) == 0:
-            ladders_df = pd.DataFrame(columns=['track','start_l','end_l'])
+            ladders_df = pd.DataFrame(columns=['track', 'start_l', 'end_l'])
         else:
             ladders_df.rename(columns={"start": "start_l", "end": "end_l"}, inplace=True)
         if chutes_df.columns is None or len(chutes_df.columns) == 0:
-            chutes_df = pd.DataFrame(columns=['track','start_c','end_c'])
+            chutes_df = pd.DataFrame(columns=['track', 'start_c', 'end_c'])
         else:
             chutes_df.rename(columns={"start": "start_c", "end": "end_c"}, inplace=True)
         if events_df.columns is None or len(events_df.columns) == 0:
-            events_df = pd.DataFrame(columns=['track','start_e','end_e'])
+            events_df = pd.DataFrame(columns=['track', 'start_e', 'end_e'])
         else:
             events_df.rename(columns={"start": "start_e", "end": "end_e"}, inplace=True)
 
-        #TODO: figure out how inde3xintg works???
+        # TODO: figure out how inde3xintg works???
         # moves_df.set_index(['track', 'currpos'], inplace=True, drop=False)
         # moves_df.index.name = 'idx_track_currpos'
         # moves_df.set_index(['trial', 'track', 'player', 'movenum'], inplace=True, drop=False)
@@ -200,62 +253,61 @@ class Stats:
         chutes_df.sort_values(['track', 'end_c'], inplace=True)
         events_df.sort_values(['track', 'end_e'], inplace=True)
 
-        #Join into data analytics tables
+        # Join into data analytics tables
         joined_df = pd.merge(moves_df, ladders_df, left_on=['track', 'currpos'], right_on=['track', 'end_l'],
-                             how = 'left')
+                             how='left')
         joined_df = pd.merge(joined_df, chutes_df, left_on=['track', 'currpos'], right_on=['track', 'end_c'],
-                             how = 'left')
+                             how='left')
         joined_df = pd.merge(joined_df, events_df, left_on=['track', 'currpos'], right_on=['track', 'end_e'],
-                             how = 'left').reset_index()
+                             how='left').reset_index()
         # joined_df.set_index(['trialmux', 'track', 'player', 'movenum'], inplace=True, drop=False)
 
-        #Rollup into game & track-level stats
-        #NOTE: include columns needed at game level in spec
+        # Rollup into game & track-level stats
+        # NOTE: include columns needed at game level in spec
         games_df = joined_df[['trialmux']].assign(moves=1).groupby('trialmux').agg('sum').reset_index()
         games_by_track_df = (joined_df[['trialmux', 'track']].assign(moves=1).groupby(['trialmux', 'track']).agg('sum')
                              .reset_index())
 
-        #Compute game & track-level stats
-        self.soexcitespeggingbytrack = [float(e)/float(gp.numtrials) for e in ((joined_df.query('soexcite == True'))[['track']]
-                                                                 .assign(moves=1).groupby(['track'])
-                                                                 .agg('sum')['moves'].to_list())]
+        # Compute game & track-level stats
+        self.soexcitespeggingbytrack = [float(e) / float(gp.numtrials) for e in
+                                        ((joined_df.query('soexcite == True'))[['track']]
+                                         .assign(moves=1).groupby(['track'])
+                                         .agg('sum')['moves'].to_list())]
         self.soexcitespegging = sum(self.soexcitespeggingbytrack)
-        self.repeatsbytrack  = ([float(r)/float(gp.numtrials) for r in joined_df.query('not end_e.isnull()')
+        self.repeatsbytrack = ([float(r) / float(gp.numtrials) for r in joined_df.query('not end_e.isnull()')
         [['trialmux', 'track', 'eventhit']].assign(hits=1).groupby(['trialmux', 'track', 'eventhit']).agg('sum')
         .query('hits > 1').assign(repeats=1).groupby(['track']).agg('sum')['repeats'].to_list()])
         self.repeats = sum(self.repeatsbytrack)
 
         self.avglengthinrounds = (float(sum(joined_df[['trialmux', 'round']].groupby(['trialmux']).agg('max')['round']
-                                            .to_list()))/float(gp.numtrials))
+                                            .to_list())) / float(gp.numtrials))
 
-        self.chutesbytrack = ([float(c)/float(gp.numtrials) for c in joined_df[['track', 'end_c']]
+        self.chutesbytrack = ([float(c) / float(gp.numtrials) for c in joined_df[['track', 'end_c']]
         .dropna().assign(chutes=1).groupby(['track']).agg('sum').sort_values(['track'])['chutes'].to_list()])
-        self.laddersbytrack = ([float(l)/float(gp.numtrials) for l in joined_df[['track', 'end_l']]
+        self.laddersbytrack = ([float(l) / float(gp.numtrials) for l in joined_df[['track', 'end_l']]
         .dropna().assign(ladders=1).groupby(['track']).agg('sum').sort_values(['track'])['ladders'].to_list()])
         self.eventsbytrack = [l + c for (l, c) in zip(self.laddersbytrack, self.chutesbytrack)]
         self.ladders = sum(self.laddersbytrack)
         self.chutes = sum(self.chutesbytrack)
         self.events = sum(self.eventsbytrack)
 
-        #Build histagrams of events
-        #NOTE: stripping out columns from joined_df so doesn't wipe all records on dropna
+        # Build histagrams of events
+        # NOTE: stripping out columns from joined_df so doesn't wipe all records on dropna
         raw_hist_df = (pd.merge(games_df, joined_df[['end_e', 'trialmux', 'ladderorchuteamt', 'movenum']].reset_index(),
-                                on=['trialmux'],suffixes=('_sum', '')).dropna())
+                                on=['trialmux'], suffixes=('_sum', '')).dropna())
         raw_hist_df['normmove'] = raw_hist_df['movenum'] / raw_hist_df['moves']
         # self.hist_df = raw_hist_df[['normmove', 'ladderorchuteamt']].set_index(['normmove']).sort_index()
         self.hist_df = raw_hist_df[['normmove', 'ladderorchuteamt']].sort_values(['normmove'])
         raw_hist_by_track_df = (pd.merge(games_by_track_df, joined_df[['end_e', 'trialmux', 'track',
-        'ladderorchuteamt', 'movenum']].reset_index(), on=['trialmux', 'track'], suffixes=('_sum', '')).dropna())
+                                                                       'ladderorchuteamt', 'movenum']].reset_index(),
+                                         on=['trialmux', 'track'], suffixes=('_sum', '')).dropna())
         raw_hist_by_track_df['normmove'] = raw_hist_by_track_df['movenum'] / raw_hist_by_track_df['moves']
         # self.hist_by_track_df = (raw_hist_by_track_df[['track', 'normmove', 'ladderorchuteamt']]
         #                     .set_index(['track', 'normmove']).sort_index())
         self.hist_by_track_df = (raw_hist_by_track_df[['track', 'normmove', 'ladderorchuteamt']]
-                            .sort_values(['track', 'normmove']))
+                                 .sort_values(['track', 'normmove']))
 
-
-
-
-        #Build look forward events dataframes
+        # Build look forward events dataframes
         laddersin1_df = pd.merge(moves_df, ladders_df, left_on=['track', 'posin1'], right_on=['track', 'start_l'])
         chutesin1_df = pd.merge(moves_df, chutes_df, left_on=['track', 'posin1'], right_on=['track', 'start_c'])
         laddersin2_df = pd.merge(moves_df, ladders_df, left_on=['track', 'posin2'], right_on=['track', 'start_l'])
@@ -266,18 +318,18 @@ class Stats:
         laddersin2_df.sort_values(['track', 'trialmux'])
         chutesin2_df.sort_values(['track', 'trialmux'])
 
-        self.laddersin1bytrack = ([float(i)/float(gp.numtrials) for i in
+        self.laddersin1bytrack = ([float(i) / float(gp.numtrials) for i in
                                    (laddersin1_df.groupby(['track', 'trialmux']).size().reset_index(name='counts').
-                                  groupby('track').agg('sum')['counts'].to_list())])
-        self.laddersin2bytrack = ([float(i)/float(gp.numtrials) for i in
+                                    groupby('track').agg('sum')['counts'].to_list())])
+        self.laddersin2bytrack = ([float(i) / float(gp.numtrials) for i in
                                    (laddersin2_df.groupby(['track', 'trialmux']).size().reset_index(name='counts').
-                                  groupby('track').agg('sum')['counts'].to_list())])
-        self.chutesin1bytrack = ([float(i)/float(gp.numtrials) for i in
+                                    groupby('track').agg('sum')['counts'].to_list())])
+        self.chutesin1bytrack = ([float(i) / float(gp.numtrials) for i in
                                   (chutesin1_df.groupby(['track', 'trialmux']).size().reset_index(name='counts').
-                                 groupby('track').agg('sum')['counts'].to_list())])
-        self.chutesin2bytrack = ([float(i)/float(gp.numtrials) for i in
+                                   groupby('track').agg('sum')['counts'].to_list())])
+        self.chutesin2bytrack = ([float(i) / float(gp.numtrials) for i in
                                   (chutesin2_df.groupby(['track', 'trialmux']).size().reset_index(name='counts').
-                                 groupby('track').agg('sum')['counts'].to_list())])
+                                   groupby('track').agg('sum')['counts'].to_list())])
         self.eventsin1bytrack = [l + c for l, c in zip(self.laddersin1bytrack, self.chutesin1bytrack)]
         self.eventsin2bytrack = [l + c for l, c in zip(self.laddersin2bytrack, self.chutesin2bytrack)]
         self.laddersin1 = sum(self.laddersin1bytrack)
@@ -287,7 +339,18 @@ class Stats:
         self.eventsin1 = self.laddersin1 + self.chutesin1
         self.eventsin2 = self.laddersin2 + self.chutesin2
 
-    def buildSet4PlusInsertSnippet(self, partialSet, overall = None, end = False):
+    def buildSet4PlusInsertSnippet(self, partialSet, overall=None, end=False):
+        """
+        Build a SQL snippet for inserting a set of values into a table.
+
+        Args:
+            partialSet (list): A list of values to be inserted into the table.
+            overall (int): An optional overall value to be inserted into the table.
+            end (bool): If True, the trailing comma will be removed from the snippet.
+
+        Returns:
+            str: The SQL snippet for inserting the values into the table.
+        """
         snippet_sb = StringIO()
         if overall is not None:
             snippet_sb.write("{},".format(overall))
@@ -301,14 +364,27 @@ class Stats:
         return snippet
 
     def insertStatsRecord(self):
+        """
+        Insert a stats record into the database.
+
+        This method inserts a stats record into the database given the
+        game parameters, board, and moves. It also calculates
+        various board level setup stats and balance stats.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         sqliteConn = sql.connect('Boards/AllBoards.db')
         sqliteCursor = sqliteConn.cursor()
 
-        #Prepend columns to write to, all except auto-incrementing Stat_ID
+        # Prepend columns to write to, all except auto-incrementing Stat_ID
         insertstatquery_sb = StringIO()
         insertstatquery_sb.write(gp.insertstatstub)
 
-        #board level setup stats
+        # board level setup stats
         tracksList_sb = StringIO()
         if gp.tracksused is None:
             for p in self.squad.players:
@@ -327,21 +403,22 @@ class Stats:
         tracksList_sb.seek(pos)
         tracksList = tracksList_sb.getvalue()[:-1]
         tracksList_sb.close()
-        #NOTE: this is less efficient than including values directly using '?'s but this insert only fires infrequently
+        # NOTE: this is less efficient than including values directly using '?'s but this insert only fires infrequently
         insertstatquery_sb.write("{},\'{}\',{},{},{},\'{}\',\'{}\',{},".format(self.board.boardID, dt.datetime.now(),
-                                                                    gp.numtrials,gp.numplayers, gp.numdecks,
-                                                                    tracksList,
-                                                                    self.board.boardName, self.avglengthinrounds))
+                                                                               gp.numtrials, gp.numplayers, gp.numdecks,
+                                                                               tracksList,
+                                                                               self.board.boardName,
+                                                                               self.avglengthinrounds))
 
-        #balance stats
-        #NOTE: we cannot use player.wins with the multprocessing!
+        # balance stats
+        # NOTE: we cannot use player.wins with the multprocessing!
         winsByPlayer = col.Counter([m.player for m in self.moves if m.winningMove])
         self.partialBalanceSet = [(float(winsByPlayer[p.num]) - (float(gp.numtrials) / float(gp.numplayers))) /
                                   float(gp.numtrials) for p in self.squad.players]
         insertstatquery_sb.write(self.buildSet4PlusInsertSnippet(self.partialBalanceSet))
         self.partialBalanceSet = [s for s in zip([p.tracknum for p in self.squad.players], self.partialBalanceSet)]
 
-        #track stats
+        # track stats
         insertstatquery_sb.write(self.buildSet4PlusInsertSnippet(self.soexcitespeggingbytrack, self.soexcitespegging))
         insertstatquery_sb.write(self.buildSet4PlusInsertSnippet(self.repeatsbytrack, self.repeats))
 
@@ -357,19 +434,35 @@ class Stats:
         insertstatquery_sb.write(self.buildSet4PlusInsertSnippet(self.laddersin2bytrack, self.laddersin2))
         insertstatquery_sb.write(self.buildSet4PlusInsertSnippet(self.eventsin2bytrack, self.eventsin2, True))
 
-        #finalize query and commit data
+        # finalize query and commit data
         insertstatquery_sb.write(")")
         query = insertstatquery_sb.getvalue()
         insertstatquery_sb.close()
         sqliteCursor.execute(query)
         sqliteConn.commit()
-        #TODO: insert file links to heatmaps once generated
-
+        # TODO: insert file links to heatmaps once generated
 
     def print_metrics(self):
-        #TODO: also commit this to data table in sql
-        with open(("./Board_Results/" + self.board.boardName + "-" + str(gp.numplayers) + "-" + str(gp.numdecks) +"-" +
-                   str(gp.numtrials) + "-" +  datetime.datetime.now().strftime("%y%m%d%H%M%S") + ".txt"), "w") as results:
+        # TODO: also commit this to data table in sql
+        """
+        Print game metrics to a text file.
+
+        This method prints out various metrics from the game, including
+        the balance, so excites, boring repeats, and snakes/ladders, as
+        well as the likelihood of these events per round. The metrics are
+        written to a text file, with the filename being a combination of the
+        board name, number of players, number of decks, number of trials, and
+        the current date and time.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with open(("./Board_Results/" + self.board.boardName + "-" + str(gp.numplayers) + "-" + str(gp.numdecks) + "-" +
+                   str(gp.numtrials) + "-" + datetime.datetime.now().strftime("%y%m%d%H%M%S") + ".txt"),
+                  "w") as results:
             results.write("\t" + self.board.boardName + "\n")
             results.write("Lengths\t")
 
@@ -385,27 +478,27 @@ class Stats:
             results.write("balance (<5% reasonable for traditional board, for comparison) \t")
             strTemp = ""
             for player in self.squad.players:
-                winDif = (float(player.wins) - (float(gp.numtrials)/float(gp.numplayers)))/float(gp.numtrials)
+                winDif = (float(player.wins) - (float(gp.numtrials) / float(gp.numplayers))) / float(gp.numtrials)
                 strTemp += "{:.2%} (Player {}), ".format(winDif, player.num)
             results.write(strTemp[:-2] + "\n")
 
-            results.write("So excites (when some pegging options yield events and others don't)\t" + str(st.mean(self.soexcites_pegs)) + "\n")
+            results.write("So excites (when some pegging options yield events and others don't)\t" + str(
+                st.mean(self.soexcites_pegs)) + "\n")
             results.write("Boring repeats\t" + str(st.mean(self.repeats)) + "\n")
             results.write("Snakes/Ladders\t" + str(st.mean(self.events)) + "\n")
             results.write("Snakes/Ladders in 1 incr\t" + str(st.mean(self.eventsin1)) + "\n")
             results.write("Snakes/Ladders in 2 incrs\t" + str(st.mean(self.eventsin2)) + "\n")
             results.write("# rounds\t" + str(st.mean(self.lengths_in_rounds)) + "\n")
             results.write("Likelihood So excites (pegging) per round\t{:.2%}\n".
-                          format(st.mean(self.soexcites_pegs)/st.mean(self.lengths_in_rounds)))
+                          format(st.mean(self.soexcites_pegs) / st.mean(self.lengths_in_rounds)))
             results.write("Likelihood Boring repeats per round\t{:.2%}\n".
-                          format(st.mean(self.repeats)/st.mean(self.lengths_in_rounds)))
+                          format(st.mean(self.repeats) / st.mean(self.lengths_in_rounds)))
             results.write("Likelihood Snakes/Ladders per round\t{:.2%}\n".
-                          format(st.mean(self.events)/st.mean(self.lengths_in_rounds)))
+                          format(st.mean(self.events) / st.mean(self.lengths_in_rounds)))
             results.write("Likelihood Snakes/Ladders in 1 incr per round\t{:.2%}\n".
-                          format(st.mean(self.eventsin1)/st.mean(self.lengths_in_rounds)))
+                          format(st.mean(self.eventsin1) / st.mean(self.lengths_in_rounds)))
             results.write("Likelihood Snakes/Ladders in 2 incrs per round\t{:.2%}\n".
-                          format(st.mean(self.eventsin2)/st.mean(self.lengths_in_rounds)))
-
+                          format(st.mean(self.eventsin2) / st.mean(self.lengths_in_rounds)))
 
             # event_norm_mags_sorted = sorted(event_norm_mags, key = lambda e: (e[0], e[1]))
             # results.write("\n--------------------------------------------------------------\n")
@@ -414,6 +507,22 @@ class Stats:
             #     results.write("{}\t{}\n".format(bin,mag))
 
     def print_temp_maps(self):
+        """
+        Print a heat map of the game, with the x-axis being Game_Duration and
+        the y-axis being Event_Magnitude. The heat map shows the likelihood of
+        each combination of Game_Duration and Event_Magnitude.
+
+        Each heat map is saved as a PNG file in the Board_Results/images
+        directory, with the filename being a combination of the board name,
+        number of players, number of decks, number of trials, and the current
+        date and time.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         if self.hist_df is None or self.hist_df.empty:
             return
 
@@ -421,11 +530,11 @@ class Stats:
             cur_df = (self.hist_by_track_df.loc[self.hist_by_track_df['track'] == tracknum]
                       [['normmove', 'ladderorchuteamt']] if tracknum > 0
                       else self.hist_df)
-            cur_df.rename(columns={'normmove':'Game_Duration', 'ladderorchuteamt':'Event_Magnitude'}, inplace=True)
+            cur_df.rename(columns={'normmove': 'Game_Duration', 'ladderorchuteamt': 'Event_Magnitude'}, inplace=True)
             title = 'Played Heat: Track {}'.format(tracknum) if tracknum > 0 else 'Played Heat: Overall'
             filename = ("./Board_Results/images/{}-{}-{}-{}-{}-{}.png".
-                        format(self.board.boardName,str(gp.numplayers),str(gp.numdecks),
-                               str(gp.numtrials),"Overall" if tracknum > 0 else "Track {}".format(tracknum),
+                        format(self.board.boardName, str(gp.numplayers), str(gp.numdecks),
+                               str(gp.numtrials), "Overall" if tracknum > 0 else "Track {}".format(tracknum),
                                datetime.datetime.now().strftime("%y%m%d%H%M%S")))
 
             fig, ax1 = plt.subplots(ncols=1, figsize=(30, 15), sharex=True, sharey=True)
@@ -437,13 +546,35 @@ class Stats:
             plt.tight_layout()
             plt.savefig(filename)
 
+
 class Move:
     def __init__(self, threadnum, trial, track, moveNum, round, playerNum, oldScore, baseScore, reason, event, newScore,
-                        soexcite, pegMove):
+                 soexcite, pegMove):
+        """
+        Initializes a Move object with given parameters.
+
+        Parameters:
+            threadnum (int): Thread number
+            trial (int): Trial number
+            track (Track): Track object
+            moveNum (int): Move number
+            round (int): Round number
+            playerNum (int): Player number
+            oldScore (int): Old score
+            baseScore (int): Base score
+            reason (str): Reason for the move
+            event (en.Event): Event type
+            newScore (int): New score
+            soexcite (bool): Whether the move was a "so excite" move
+            pegMove (bool): Whether the move was a pegging move
+
+        Returns:
+            None
+        """
         eventAmt = newScore - oldScore - baseScore
         self.threadnum = threadnum
         self.trial = trial
-        self.trialmux = 10000*threadnum + trial
+        self.trialmux = 10000 * threadnum + trial
         self.movenum = moveNum
         self.player = playerNum
         self.track = track.num
@@ -486,27 +617,27 @@ class Move:
 
     def to_dict(self):
         return {
-     'movenum'     : self.movenum
-     ,'threadnum'        : self.threadnum
-     ,'trial'        : self.trial
-     ,'trialmux'        : self.trialmux
-     ,'player'      : self.player
-     ,'round'      : self.round
-     ,'track' : self.track
-     ,'track_id' : self.track_id
-     ,'score'  : self.score
-     ,'basescore' : self.basescore
-     ,'ladderamt'    : self.ladderamt
-     ,'chuteamt'     : self.chuteamt
-     ,'ladderorchuteamt' : self.ladderorchuteamt
-     ,'ladderhit' : self.ladderhit
-     ,'chutehit' : self.chutehit
-     ,'eventhit' : self.eventhit
-     ,'currpos'      : self.currpos
-     ,'posin1'       : self.posin1
-     ,'posin2'       : self.posin2
-     ,'soexcite'       : self.soexcite
-     ,'reason'       : self.reason
-     ,'winningmove'       : self.winningMove
-            ,'pegmove' : self.pegMove
+            'movenum': self.movenum
+            , 'threadnum': self.threadnum
+            , 'trial': self.trial
+            , 'trialmux': self.trialmux
+            , 'player': self.player
+            , 'round': self.round
+            , 'track': self.track
+            , 'track_id': self.track_id
+            , 'score': self.score
+            , 'basescore': self.basescore
+            , 'ladderamt': self.ladderamt
+            , 'chuteamt': self.chuteamt
+            , 'ladderorchuteamt': self.ladderorchuteamt
+            , 'ladderhit': self.ladderhit
+            , 'chutehit': self.chutehit
+            , 'eventhit': self.eventhit
+            , 'currpos': self.currpos
+            , 'posin1': self.posin1
+            , 'posin2': self.posin2
+            , 'soexcite': self.soexcite
+            , 'reason': self.reason
+            , 'winningmove': self.winningMove
+            , 'pegmove': self.pegMove
         }
