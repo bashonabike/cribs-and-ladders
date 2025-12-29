@@ -19,7 +19,8 @@ from mystic.solvers import fmin
 from mystic.monitors import VerboseMonitor
 import copy as cp
 
-#NOTE: this is outside the class called statically to avoid sql pickling issues (Optimizer & Eval have stored conns)
+
+# NOTE: this is outside the class called statically to avoid sql pickling issues (Optimizer & Eval have stored conns)
 def trialsPerThread(board, squad, threadNum, trialsOnThread):
     """
     Runs a specified number of trials of the Cribbage game on a separate thread.
@@ -44,10 +45,12 @@ def trialsPerThread(board, squad, threadNum, trialsOnThread):
         movesForThread.extend(game.play_game())
 
     return movesForThread
+
+
 class Routines:
     def __init__(self, optimizerRunSet):
 
-        #Set up lookups table in DF, index
+        # Set up lookups table in DF, index
         """
         Initializes the Routines object.
 
@@ -59,7 +62,7 @@ class Routines:
         """
         sqliteConn = sql.connect('etc/Lookups.db')
         query = ("SELECT * FROM HandDiscards{}Player{}Rank"
-                     .format("Two" if gp.numplayers == 2 else "Three", "TwoDeck" if gp.twodecks else "OneDeck"))
+                 .format("Two" if gp.numplayers == 2 else "Three", "TwoDeck" if gp.twodecks else "OneDeck"))
         self.rankLookupTable = pd.read_sql_query(query, sqliteConn)
         self.rankLookupTable.set_index(['HandHash', 'DiscardHash', 'HasCrib'], inplace=True)
         self.rankLookupTable.sort_index(inplace=True)
@@ -72,12 +75,11 @@ class Routines:
         self.eventSetBuilder = None
         self.optimizerRunSet, self.optimizerRun = optimizerRunSet, 0
 
-        #TODO: refactor & docu https://www.sitepoint.com/refactor-code-gpt/#h-refactoring-code-with-gpt-4-and-chatgpt
+        # TODO: refactor & docu https://www.sitepoint.com/refactor-code-gpt/#h-refactoring-code-with-gpt-4-and-chatgpt
 
-
-    #TODO: run purely probabilistic mini model, run for iterative bit
-    #Maybe bounds likely peg round, likely score round, vary it bit, still do multiproc, maybe fewer trials tho
-    #Since can control variability
+    # TODO: run purely probabilistic mini model, run for iterative bit
+    # Maybe bounds likely peg round, likely score round, vary it bit, still do multiproc, maybe fewer trials tho
+    # Since can control variability
     def run_trials(self, board, squad, stats, debug=False):
         """
         Runs a specified number of trials of the Cribbage game using multiprocessing.
@@ -97,15 +99,15 @@ class Routines:
         """
         squad.resetWins()
         pool = mp.Pool(processes=gp.nummaxthreads)
-        trialsOnThread = math.floor(gp.numtrials/gp.nummaxthreads)
-        #Unsure why __debug__ is flagged when run, no -o flag in command...0_o
+        trialsOnThread = math.floor(gp.numtrials / gp.nummaxthreads)
+        # Unsure why __debug__ is flagged when run, no -o flag in command...0_o
         if debug:
-            movesOnSet=trialsPerThread(board, squad, 0, 5)
+            movesOnSet = trialsPerThread(board, squad, 0, 5)
         else:
-            boardsToIter = [board]*gp.nummaxthreads
-            squadsToIter = [squad]*gp.nummaxthreads
+            boardsToIter = [board] * gp.nummaxthreads
+            squadsToIter = [squad] * gp.nummaxthreads
             movesOnSetSplit = pool.starmap(trialsPerThread, zip(boardsToIter, squadsToIter, range(gp.nummaxthreads),
-                                                            repeat(trialsOnThread)))
+                                                                repeat(trialsOnThread)))
             movesOnSet = []
             for s in movesOnSetSplit: movesOnSet.extend(s)
         stats.clearStatsAndSetMoves(movesOnSet)
@@ -138,7 +140,8 @@ class Routines:
             self.run_trials(self.board, self.squad, stats)
             end = time.time()
             print(end - start)
-            eval = evl.Evaluator(eventSetBuilder, self.board, self.posevents, stats, sqlOptimizerCon, self.optimizerRunSet, i)
+            eval = evl.Evaluator(eventSetBuilder, self.board, self.posevents, stats, sqlOptimizerCon,
+                                 self.optimizerRunSet, i)
             eval.detMetrics()
             eval.writeMetricsToDb()
             eventSetBuilder.paramSet.tempWriteMetricsToDb(eval)
@@ -171,11 +174,11 @@ class Routines:
         stats = crst.Stats(self.board, self.squad, self.optimizerRunSet, self.optimizerRun)
         self.run_trials(self.board, self.squad, stats)
         sqlOptimizerCon = sql.connect("etc/Optimizer")
-        eval = evl.Evaluator(eventSetBuilder, self.board, self.posevents, stats, sqlOptimizerCon, self.optimizerRunSet, 100001)
+        eval = evl.Evaluator(eventSetBuilder, self.board, self.posevents, stats, sqlOptimizerCon, self.optimizerRunSet,
+                             100001)
         eval.detMetrics()
         eval.writeMetricsToDb()
         eventSetBuilder.paramSet.tempWriteMetricsToDb(eval)
-
 
     def checkBoardBestTrial(self, optimizerRunSet, optimizerRun):
         """
@@ -248,14 +251,14 @@ class Routines:
         self.run_trials(self.board, self.squad, stats)
         sqlOptimizerCon = sql.connect("etc/Optimizer")
         eval = evl.Evaluator(self.eventSetBuilder, self.board, self.posevents, stats, sqlOptimizerCon,
-                             self.optimizerRunSet,self.optimizerRun)
+                             self.optimizerRunSet, self.optimizerRun)
         sqlOptimizerCon.close()
         eval.detMetrics()
         eval.writeMetricsToDb()
         self.eventSetBuilder.paramSet.tempWriteMetricsToDb(eval)
         return self.optimizer.detWeighedScoring(eval.results)
 
-    def setUpBoard(self, homoRisk = False):
+    def setUpBoard(self, homoRisk=False):
         """
         Sets up the board, posevents, eventSetBuilder, optimizer, and squad objects.
 
@@ -295,8 +298,6 @@ class Routines:
         self.squad = CribSquad(self.rankLookupTable, self.board.tracks)
         stats = crst.Stats(self.board, self.squad, self.optimizerRunSet, self.optimizerRun)
         self.run_trials(self.board, self.squad, stats, debug=debug)
-
-
 
     def runFmin(self):
         # Initial guesses & bounds for the parameters
@@ -358,9 +359,9 @@ class Routines:
             weighedPreScoring = 999999
             while weighedPreScoring > gp.prescorecutoff:
                 self.board.setEffLandingForHolesAllTracks()
-                #Run initial board spec stats
+                # Run initial board spec stats
                 evalPre = evl.Evaluator(self.eventSetBuilder, self.board, self.posevents, None, sqlOptimizerCon,
-                                     self.optimizerRunSet, self.optimizerRun)
+                                        self.optimizerRunSet, self.optimizerRun)
                 evalPre.detMetrics(onlyGameBoardStats=True)
                 evalPre.writeMetricsToDb()
                 self.eventSetBuilder.paramSet.tempWriteMetricsToDb(evalPre)
@@ -374,7 +375,7 @@ class Routines:
                 self.optimizerRun += 1
                 freshParams = self.optimizer.runIncrIteration(self.eventSetBuilder.paramSet.params, evalPre.results)
                 curEventSet = self.eventSetBuilder.buildBoardFromParams(pd.DataFrame.from_records(freshParams),
-                                                          self.optimizerRunSet, self.optimizerRun)
+                                                                        self.optimizerRunSet, self.optimizerRun)
                 boardSettingStalled = curEventSet is None
                 if boardSettingStalled: break
             if boardSettingStalled: break
@@ -411,7 +412,7 @@ class Routines:
             self.optimizerRun += 1
             freshParams = self.optimizer.runIncrIteration(self.eventSetBuilder.paramSet.params, eval.results)
             curEventSet = self.eventSetBuilder.buildBoardFromParams(pd.DataFrame.from_records(freshParams),
-                                                      self.optimizerRunSet, self.optimizerRun)
+                                                                    self.optimizerRunSet, self.optimizerRun)
             boardSettingStalled = curEventSet is None
             if boardSettingStalled:
                 self.optimizer.setBestIterParams(bestParams)
@@ -441,7 +442,7 @@ if __name__ == "__main__":
 
     routines = Routines(optimizerRunSet=18)
     # routines.runNormalCribGame(debug=False)
-    routines.setUpBoard(homoRisk = False)
+    routines.setUpBoard(homoRisk=False)
     bestIterParams = routines.runIter(debug=False)
     print(bestIterParams)
     # bestFminParams = routines.runFmin()
