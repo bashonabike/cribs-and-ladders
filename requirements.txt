@@ -1,0 +1,42 @@
+numpy>=1.20.0
+scipy>=1.7.0
+pandas>=1.3.0
+matplotlib>=3.4.0
+seaborn>=0.11.0
+lightgbm>=3.3.0
+scikit-learn>=1.0.0
+mystic>=0.3.0
+ezdxf>=0.17.0
+pybind11>=2.9.0
+
+# Development dependencies
+pytest>=6.2.0
+black>=21.0
+flake8>=3.9.0
+mypy>=0.900
+
+# Local pybind dependencies
+-e ./ScoreTreeTry2
+-e ./MarkovBind
+
+# Note: The following are part of the Python standard library and don't need to be installed:
+# - copy
+# - os
+# - math
+# - random
+# - sqlite3 (as sql)
+# - multiprocessing (as mp)
+# - itertools
+# - datetime
+# - collections
+# - bisect
+# - io
+# - re
+# - subprocess
+# - pathlib
+# - glob
+# - contextlib
+# - enum
+# - heapq
+# - statistics
+# - xml.dom.minidom

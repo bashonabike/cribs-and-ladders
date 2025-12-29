@@ -373,6 +373,7 @@ class Optimizer:
         self.prevResults = self.freshResults
         return self.params
 
+
     def detWeighedScoring(self, freshResults):
         """
         Calculate a weighted scoring of the results.

@@ -1,10 +1,7 @@
-
-from cribsandladders.Player import Player
 from cribsandladders.CribbageGame import CribbageGame
 from cribsandladders.Board import Board
 from cribsandladders.CribSquad import CribSquad
 import cribsandladders.DXFWriter as dxf
-import os
 import game_params as gp
 import cribsandladders.Stats as crst
 import cribsandladders.PossibleEvents as ps
@@ -12,20 +9,30 @@ import cribsandladders.EventSetBuilder as op
 import cribsandladders.Evaluator as evl
 import cribsandladders.Optimizer as opt
 import sqlite3 as sql
-import cProfile as cprf
 import multiprocessing as mp
 import pandas as pd
 import cribsandladders.BoardSetter as bstr
 from itertools import repeat
 import math
 import time
-import mystic
 from mystic.solvers import fmin
 from mystic.monitors import VerboseMonitor
 import copy as cp
 
-#NOTE: this is outside tha class called staticly to avoic sql pickling issues (Optimizer & Eval have stored conns)
+#NOTE: this is outside the class called statically to avoid sql pickling issues (Optimizer & Eval have stored conns)
 def trialsPerThread(board, squad, threadNum, trialsOnThread):
+    """
+    Runs a specified number of trials of the Cribbage game on a separate thread.
+
+    Args:
+        board (Board): The board to play on.
+        squad (CribSquad): The players to play with.
+        threadNum (int): The thread number to identify the thread.
+        trialsOnThread (int): The number of trials to run.
+
+    Returns:
+        list: A list of Move objects recorded during the game.
+    """
     movesForThread = []
     for i in range(trialsOnThread):
         # print("Running game " + str(i + 1) + " of " + str(gp.numtrials) + "\r")
@@ -41,6 +48,15 @@ class Routines:
     def __init__(self, optimizerRunSet):
 
         #Set up lookups table in DF, index
+        """
+        Initializes the Routines object.
+
+        Args:
+            optimizerRunSet (int): The optimizer run set to run.
+
+        Sets up the lookups table in a DataFrame, indexes it, and sorts the index.
+        Also sets up the optimizer, board, squad, possible events, and event set builder objects.
+        """
         sqliteConn = sql.connect('etc/Lookups.db')
         query = ("SELECT * FROM HandDiscards{}Player{}Rank"
                      .format("Two" if gp.numplayers == 2 else "Three", "TwoDeck" if gp.twodecks else "OneDeck"))
@@ -63,6 +79,22 @@ class Routines:
     #Maybe bounds likely peg round, likely score round, vary it bit, still do multiproc, maybe fewer trials tho
     #Since can control variability
     def run_trials(self, board, squad, stats, debug=False):
+        """
+        Runs a specified number of trials of the Cribbage game using multiprocessing.
+
+        Args:
+            board (Board): The board to play on.
+            squad (CribSquad): The players to play with.
+            stats (Stats): The stats object to store and process the results.
+            debug (bool): Whether to run a debug version of the trials or not.
+
+        Returns:
+            None
+
+        Notes:
+            If debug is True, the method runs a debug version of the trials with only 5 trials.
+            Otherwise, it runs the specified number of trials in parallel using multiprocessing.
+        """
         squad.resetWins()
         pool = mp.Pool(processes=gp.nummaxthreads)
         trialsOnThread = math.floor(gp.numtrials/gp.nummaxthreads)
@@ -82,6 +114,18 @@ class Routines:
         stats.insertStatsRecord()
 
     def genTrainSet(self):
+        """
+        Generates a training set for the optimizer by running a Monte Carlo simulation.
+
+        Args:
+            None
+
+        Returns:
+            None
+
+        Notes:
+            This method sets up the board, runs a Monte Carlo simulation, and writes the results to a database.
+        """
         self.setUpBoard()
         eventSetBuilder = op.EventSetBuilder(self.board, self.posevents)
         self.board.setEffLandingForHolesAllTracks()
@@ -100,6 +144,21 @@ class Routines:
             eventSetBuilder.paramSet.tempWriteMetricsToDb(eval)
 
     def attemptOptimalLayout(self):
+        """
+        Attempts to find an optimal board layout using gradient boosting machines.
+
+        This method sets up a board, runs a gradient boosting machine to find the optimal parameters,
+        builds a board using the optimal parameters, and evaluates the board using a Monte Carlo simulation.
+
+        Args:
+            None
+
+        Returns:
+            None
+
+        Notes:
+            This method is a wrapper around the Optimizer class and the Evaluator class.
+        """
         self.setUpBoard()
         self.optimizer = opt.Optimizer(self.board, 1)
         self.optimizer.retrieveTrainData()
@@ -119,6 +178,20 @@ class Routines:
 
 
     def checkBoardBestTrial(self, optimizerRunSet, optimizerRun):
+        """
+        Retrieves the best trial parameters for the given optimizer run set and run.
+
+        Args:
+            optimizerRunSet (int): The optimizer run set to retrieve.
+            optimizerRun (int): The specific optimizer run to retrieve.
+
+        Returns:
+            None
+
+        Notes:
+            This method sets up the board, builds a board using the optimal parameters,
+            sets the board to have efficient landing for holes in all tracks, and plots the board.
+        """
         self.setUpBoard()
         eventSetBuilder = op.EventSetBuilder(self.board, self.posevents)
         eventSetBuilder.buildBoardFromParamsDb(optimizerRunSet, optimizerRun)
@@ -126,6 +199,22 @@ class Routines:
         eventSetBuilder.plotBoard()
 
     def microRegressionsUsingInputOutputPairings(self):
+        """
+        Tests the gradient boosting machine on the input/output pairings of the given board.
+
+        The method sets up a board with the given name, sets up the PossibleEvents and CribSquad objects,
+        sets up an Optimizer object, retrieves the training data, and tests the gradient boosting machine
+        on the pairings of the board.
+
+        Args:
+            None
+
+        Returns:
+            None
+
+        Notes:
+            This method is a wrapper around the Optimizer class and the Evaluator class.
+        """
         board = Board()
         bstr.setBoardFromDb(board, gp.boardname)
         board.setBoardAfterSetter()
@@ -136,6 +225,21 @@ class Routines:
         self.optimizer.testGBMOnPairings(["gamelength", "balance"], "ladderscanstartat")
 
     def fminCostFunction(self, paramsSubset):
+        """
+        Evaluates the quality of a generated game board layout using statistical analysis,
+        gameplay simulation results, and regression fitting against ideal game curves.
+
+        Args:
+            paramsSubset (list): A subset of parameters to test.
+
+        Returns:
+            float: The weighted scoring of the given parameters subset.
+
+        Notes:
+            This method sets up the board, modifies the parameters according to the given subset,
+            runs a Monte Carlo simulation, evaluates the board using a Monte Carlo simulation,
+            and writes the results to a database.
+        """
         self.optimizerRun += 1
         self.eventSetBuilder.modParamsForFmin(paramsSubset, self.optimizer.bestPostIterParams,
                                               self.optimizerRunSet, self.optimizerRun)
@@ -152,6 +256,15 @@ class Routines:
         return self.optimizer.detWeighedScoring(eval.results)
 
     def setUpBoard(self, homoRisk = False):
+        """
+        Sets up the board, posevents, eventSetBuilder, optimizer, and squad objects.
+
+        Args:
+            homoRisk (bool): If True, sets the board to have a homogeneous risk distribution.
+
+        Notes:
+            This method sets up the essential objects for running a cribbage game.
+        """
         self.board = Board()
         bstr.setBoardFromDb(self.board, gp.boardname)
         self.board.setBoardAfterSetter()
@@ -161,6 +274,21 @@ class Routines:
         self.squad = CribSquad(self.rankLookupTable, self.board.tracks, tracksUsed=gp.tracksused, homoRisk=homoRisk)
 
     def runNormalCribGame(self, debug=False):
+        """
+        Runs a normal cribbage game using the specified board and squad.
+
+        Args:
+            debug (bool): If True, runs a debug version of the trials with only 5 trials.
+
+        Returns:
+            None
+
+        Notes:
+            This method sets up the essential objects for running a cribbage game,
+            sets up the board to have efficient landing for holes in all tracks,
+            builds a squad using the rank lookup table and board tracks,
+            and runs the trials.
+        """
         self.board = Board()
         bstr.setBoardFromDb(self.board, gp.boardname)
         self.board.setEffLandingForHolesAllTracks()
@@ -172,6 +300,24 @@ class Routines:
 
     def runFmin(self):
         # Initial guesses & bounds for the parameters
+        """
+        Runs a function minimization (FMIN) algorithm to find the optimal parameters for the given board.
+
+        The method sets up the initial guesses and bounds for the parameters,
+        sets up a monitor to observe the optimization progress,
+        runs the optimization algorithm,
+        extracts the optimized parameters,
+        and returns the optimized parameters.
+
+        Args:
+            None
+
+        Returns:
+            list: The optimized parameters.
+
+        Notes:
+            This method is a wrapper around the Optimizer class and the Evaluator class.
+        """
         self.optimizer.setupFminParamsList(self.eventSetBuilder.paramSet.params)
         initial_guess = self.optimizer.getFminStarterParams()
         bounds = self.optimizer.getFminBounds(self.eventSetBuilder.paramSet.params)
@@ -187,6 +333,20 @@ class Routines:
         return self.optimizer.bestPostFminParams
 
     def runIter(self, debug=False):
+        """
+        Runs a series of cribbage games with varying parameters to find the optimal parameters for the given board.
+
+        The method uses a combination of gradient boosting machines and Monte Carlo simulations to evaluate the quality of a generated game board layout.
+
+        Args:
+            debug (bool): If True, runs a debug version of the trials with only 5 trials.
+
+        Returns:
+            list: The optimized parameters.
+
+        Notes:
+            This method is a wrapper around the Optimizer class and the Evaluator class.
+        """
         sqlOptimizerCon = sql.connect("etc/Optimizer")
         weighedScoring = 9999999
         freshParams = None
