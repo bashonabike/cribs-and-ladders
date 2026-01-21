@@ -1,4 +1,6 @@
 import random
+import itertools
+
 
 # Constants for card suits
 SPADES = 0
@@ -61,9 +63,9 @@ class Deck:
     def __init__(self):
         """Initializes a full deck of 52 cards."""
         self.cards = []
-        for suit in range(4):
-            for i in range(1, 14):
-                self.cards.append(Card(i, suit))
+        self.cards.extend(
+            Card(i, suit) for suit, i in itertools.product(range(4), range(1, 14))
+        )
 
     def shuffle(self):
         """

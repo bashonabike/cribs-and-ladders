@@ -72,12 +72,7 @@ class Board:
         """
         tracksToIter = self.tracks if specificTracks is None else specificTracks
         for t in tracksToIter:
-            t.eventSetBuild = set()
-            t.ladders = []
-            t.chutes = []
-            t.eventsListLadder = []
-            t.eventsListChute = []
-            t.instLocked = False
+            t.clearTrackEvents()
 
 
 class Track:
@@ -108,6 +103,14 @@ class Track:
         # So sum of event values * # events / length
         # This will always be negative since always more chutes than ladders
         self.simplEventImpedance = 0.0
+
+    def clearTrackEvents(self):
+        self.eventSetBuild = []
+        self.ladders = []
+        self.chutes = []
+        self.eventsListLadder = []
+        self.eventsListChute = []
+        self.instLocked = False
 
     def addLadder(self, ladder):
         """Adds a ladder to the track."""
@@ -153,8 +156,8 @@ class Track:
         """
         Calculates the average movement impact of events per unit of track length.
         """
-        sumLadders = sum([l.length for l in self.ladders])
-        sumChutes = sum([c.length for c in self.chutes])
+        sumLadders = sum(l.length for l in self.ladders)
+        sumChutes = sum(c.length for c in self.chutes)
         self.simplEventImpedance = (sumLadders + sumChutes) * (len(self.ladders) + len(self.chutes)) / self.efflength
 
     def setEffLandingForHoles(self):
@@ -164,11 +167,11 @@ class Track:
         """
         self.effLandingForHoles = []
         if self.trackholes is None or len(self.trackholes) == 0:
-            for i in range(self.length):
-                self.effLandingForHoles.append(i + 1)
+            self.effLandingForHoles.extend(range(1, self.length + 1))
         else:
             for i in range(0, len(self.trackholes)):
                 effLanding = i + 1
+                #TODO: consolodate this, build master eventsList just bisect it
                 chute_index = bsc.bisect_left(self.eventsListChute, i + 1)
                 if (chute_index < len(self.eventsListChute) and
                         self.eventsListChute[chute_index] == i + 1):
@@ -215,31 +218,22 @@ class Track:
         return pd.DataFrame.from_records(templ)
 
 
-class Ladder:
+class Event:
+    """Represents a chute or ladder event that moves a player backward/forward."""
+    def __init__(self, start, end, track, vector=((-1, -1), (-1, -1)), eventDete=None):
+        self.start = start
+        self.end = end
+        self.length = self.end - self.start
+        self.track = track
+        self.crowVector = vector
+        self.eventDete = eventDete
+
+    def to_dict(self):
+        """Converts the chute/ladder properties to a dictionary."""
+        return {'start': self.start, 'end': self.end, 'track': self.track}
+
+class Ladder(Event):
     """Represents a ladder event that moves a player forward."""
-    def __init__(self, start, end, track, vector=((-1, -1), (-1, -1)), eventDete=None):
-        self.start = start
-        self.end = end
-        self.length = self.end - self.start
-        self.track = track
-        self.crowVector = vector
-        self.eventDete = eventDete
 
-    def to_dict(self):
-        """Converts the ladder properties to a dictionary."""
-        return {'start': self.start, 'end': self.end, 'track': self.track}
-
-
-class Chute:
+class Chute(Event):
     """Represents a chute event that moves a player backward."""
-    def __init__(self, start, end, track, vector=((-1, -1), (-1, -1)), eventDete=None):
-        self.start = start
-        self.end = end
-        self.length = self.end - self.start
-        self.track = track
-        self.crowVector = vector
-        self.eventDete = eventDete
-
-    def to_dict(self):
-        """Converts the chute properties to a dictionary."""
-        return {'start': self.start, 'end': self.end, 'track': self.track}
