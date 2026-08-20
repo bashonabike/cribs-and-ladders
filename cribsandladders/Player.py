@@ -1,12 +1,30 @@
 from cribsandladders.ScoreHand import expected_hand_value
 from cribsandladders.config import GameConfig, DEFAULT_CONFIG
 from copy import deepcopy
-import scoretree as stcpp
+
+
+def _scoretree_move_selector(handMuxed, nextPlayerCardsInHand, seqMuxed, effLandingForHoles,
+                              nextPlayerEffLandingForHoles, current_sum, score, nextPlayerCurPos, numdecks):
+    """
+    Default pegging move selector: delegates to the compiled scoretree
+    C++ extension. Imported lazily (only when this function actually
+    runs) rather than at module scope, so that importing Player.py --
+    and anything that imports Player.py, like CribSquad.py -- doesn't
+    require scoretree to be built. Only calling pegging_move() with the
+    default selector does.
+
+    A different, injectable move_selector (see Player.__init__) can
+    stand in for this in tests, without needing the extension at all.
+    """
+    import scoretree as stcpp
+    return stcpp.getCardToPlay(handMuxed, nextPlayerCardsInHand, seqMuxed, effLandingForHoles,
+                               nextPlayerEffLandingForHoles, current_sum, score, nextPlayerCurPos, numdecks)
 
 
 class Player():
 
-    def __init__(self, risk, num, rankLookupTable, tracknum=-1, config: GameConfig = DEFAULT_CONFIG):
+    def __init__(self, risk, num, rankLookupTable, tracknum=-1, config: GameConfig = DEFAULT_CONFIG,
+                 move_selector=None):
         """
         Initializes a player with a risk value, player number, and rank lookup table.
 
@@ -15,6 +33,11 @@ class Player():
         :param rankLookupTable: the rank lookup table for the player
         :param tracknum: the track number for the player, defaults to -1
         :param config: game configuration (defaults to the module-level DEFAULT_CONFIG)
+        :param move_selector: callable implementing the pegging move search
+            (same signature as scoretree.getCardToPlay). Defaults to the
+            real scoretree extension, imported lazily on first use. Tests
+            can inject a fake here instead of needing the compiled
+            extension built.
         """
         self.tracknum = tracknum
         self.num = num
@@ -26,6 +49,7 @@ class Player():
         self.wins = 0
         self.rankLookupTable = rankLookupTable
         self.config = config
+        self.move_selector = move_selector or _scoretree_move_selector
 
     def deal_hand(self, deck, count):
         """
@@ -71,13 +95,20 @@ class Player():
 
     def get_possible_4_hands(self, hand):
         """
-        Gets all possible 4 card hands from a given 6 card hand.
+        Gets all possible 4 card hands from a dealt hand. Hand size
+        varies with self.config.dealsize (5 for the default 3-player
+        config, 6 for 2-player) -- this is NOT always a 6 card hand.
 
-        For each 4 card hand, creates a PossibleHand object with the 4 card hand and the 2 cards that are not in the hand.
+        When dealsize > 5 (2-player rules: discard 2 to the crib), each
+        candidate 4-hand discards a 2-card combination. Otherwise
+        (3-player rules: discard 1 to the crib), each candidate
+        discards a single card.
+
+        For each 4 card hand, creates a PossibleHand object with the 4 card hand and the discarded card(s) not in it.
         Uses a set to avoid duplicates and only adds the PossibleHand object if the set does not already contain the hand.
         Returns a list of PossibleHand objects.
 
-        :param hand: the 6 card hand to generate possible 4 card hands from
+        :param hand: the dealt hand (size = self.config.dealsize) to generate possible 4 card hands from
         :return: a list of PossibleHand objects
         """
         possible_4 = []
@@ -122,7 +153,7 @@ class Player():
         """
         handMuxed = [c.muxed for c in self.pegginghand]
         seqMuxed = [c.muxed for c in sequence]
-        resultMuxed = stcpp.getCardToPlay(handMuxed, nextPlayerCardsInHand, seqMuxed, effLandingForHoles,
+        resultMuxed = self.move_selector(handMuxed, nextPlayerCardsInHand, seqMuxed, effLandingForHoles,
                                           nextPlayerEffLandingForHoles, current_sum,
                                           self.score, nextPlayerCurPos, self.config.numdecks)
         soexcite = resultMuxed >= 1000

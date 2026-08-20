@@ -249,6 +249,33 @@ class TestCribbageGame(unittest.TestCase):
         with self.assertRaises(IllegalMoveException):
             self.game.pegging()
 
+    def test_score_pegging_awards_a_point_for_a_single_card_go(self):
+        """
+        CHARACTERIZATION TEST, not a spec of intended behavior -- this
+        pins down a quirk (very likely a bug) in score_pegging() so any
+        future fix is a deliberate, visible diff instead of an
+        accidental one.
+
+        score_pegging()'s reverse-scan loop that builds up runBuild
+        (`for c in range(1, len(seq)): ...`) never executes when only
+        one card has been played in the current Go, since
+        range(1, 1) is empty. runBuild is left as [card.rank] (length
+        1), and the run check `runMax - runMin == len(runBuild) - 1`
+        trivially holds (0 == 0), so pegScore gets +1 for a "run" of a
+        single card. Standard cribbage requires >=3 cards for a run --
+        the very first card played in any Go should score 0 unless it
+        happens to hit 15 (impossible on the first card alone) or you
+        count "1 for last card", which is separate logic entirely.
+
+        Net effect: every single first play of a Go currently scores 1
+        point it shouldn't.
+        """
+        card = Card(TEN, HEARTS)
+        result = self.game.score_pegging([card], total=10, player=self.mock_player, soexcite=False)
+
+        self.assertFalse(result)
+        self.assertEqual(self.mock_player.score, 1)
+
     def test_check_chute_or_ladder(self):
         """Test the chute and ladder checking logic."""
         # Mock the track's chutes and ladders

@@ -61,12 +61,20 @@ class CribbageGame:
     dealing, pegging, scoring hands, and board movement.
     """
 
-    def __init__(self, board, squad, trial, threadNum=-1, config: GameConfig = DEFAULT_CONFIG):
-        """Initializes game state and players."""
+    def __init__(self, board, squad, trial, threadNum=-1, config: GameConfig = DEFAULT_CONFIG, rng=None):
+        """
+        Initializes game state and players.
+
+        :param rng: object exposing .randint(a, b) and passed through to
+            each round's Deck.shuffle(). Defaults to the global random
+            module. Inject a random.Random(seed) instance for
+            deterministic tests.
+        """
         self.board = board
         self.squad = squad
         self.config = config
-        self.firstDeal = random.randint(1, self.config.numplayers)
+        self.rng = rng or random
+        self.firstDeal = self.rng.randint(1, self.config.numplayers)
         self.currentDealer = self.firstDeal
         self.verbose = False
         self.threadNum = threadNum
@@ -82,7 +90,7 @@ class CribbageGame:
         Returns:
             list: A list of Move objects recorded during the game.
         """
-        self.currentDealer = random.randint(1, self.config.numplayers)
+        self.currentDealer = self.rng.randint(1, self.config.numplayers)
         while not self.run_round():
             # NOTE: we put the +1 ouside the mod since players start at 1
             self.currentDealer = (self.currentDealer) % self.config.numplayers + 1
@@ -101,7 +109,7 @@ class CribbageGame:
         # setup
         self.round += 1
         deck = Deck()
-        deck.shuffle()
+        deck.shuffle(self.rng)
         crib = []
 
         if self.config.cribstartsize > 0:

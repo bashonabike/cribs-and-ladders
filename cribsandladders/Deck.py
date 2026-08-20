@@ -67,11 +67,15 @@ class Deck:
             Card(i, suit) for suit, i in itertools.product(range(4), range(1, 14))
         )
 
-    def shuffle(self):
+    def shuffle(self, rng=None):
         """
         Shuffles the deck in place.
+
+        :param rng: object exposing .shuffle(list), defaults to the
+            global random module. Pass a random.Random(seed) instance
+            for deterministic tests.
         """
-        random.shuffle(self.cards)
+        (rng or random).shuffle(self.cards)
 
     def drawCard(self):
         """

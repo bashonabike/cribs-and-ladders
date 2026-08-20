@@ -11,7 +11,8 @@ class CribSquad:
     and turn-taking logic for the pegging phase.
     """
 
-    def __init__(self, rankLookupTable, tracks, tracksUsed=None, homoRisk=False, config: GameConfig = DEFAULT_CONFIG):
+    def __init__(self, rankLookupTable, tracks, tracksUsed=None, homoRisk=False, config: GameConfig = DEFAULT_CONFIG,
+                 rng=None, move_selector=None):
         """
         Initializes the squad and populates it with Player instances.
 
@@ -22,11 +23,18 @@ class CribSquad:
             homoRisk (bool): If True, all players receive the same baseline risk value (11).
                              If False, risks are randomized per player.
             config (GameConfig): game configuration (defaults to the module-level DEFAULT_CONFIG)
+            rng: object exposing .randint(a, b), used for risk randomization.
+                Defaults to the global random module. Inject a
+                random.Random(seed) for deterministic tests.
+            move_selector: passed through to each constructed Player (see
+                Player.__init__) so a fake pegging move search can be
+                injected without needing the compiled scoretree extension.
         """
         self.players = []
         self.tracksUsed = tracksUsed
         self.homoRisk = homoRisk
         self.config = config
+        self.rng = rng or r
 
         # Ensure tracks are assigned correctly to each player slot
         if self.tracksUsed is None or len(self.tracksUsed) != self.config.numplayers:
@@ -42,8 +50,9 @@ class CribSquad:
             if homoRisk:
                 risk = 11
             else:
-                risk = r.randint(1, 21)
-            self.players.append(pl.Player(risk, i + 1, rankLookupTable, self.tracksUsed[i], config=self.config))
+                risk = self.rng.randint(1, 21)
+            self.players.append(pl.Player(risk, i + 1, rankLookupTable, self.tracksUsed[i], config=self.config,
+                                           move_selector=move_selector))
 
     def resetRisks(self):
         """Re-randomizes risk levels for all players (unless homoRisk is enabled)."""
@@ -51,7 +60,7 @@ class CribSquad:
             if self.homoRisk:
                 player.risk = 11
             else:
-                player.risk = r.randint(1, 21)
+                player.risk = self.rng.randint(1, 21)
 
     def resetCanPlay(self):
         """Sets the 'canPlay' status to True for all players at the start of a pegging 'Go'."""
