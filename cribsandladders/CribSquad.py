@@ -1,5 +1,5 @@
-import game_params as gp
 import cribsandladders.Player as pl
+from cribsandladders.config import GameConfig, DEFAULT_CONFIG
 import random as r
 
 
@@ -11,7 +11,7 @@ class CribSquad:
     and turn-taking logic for the pegging phase.
     """
 
-    def __init__(self, rankLookupTable, tracks, tracksUsed=None, homoRisk=False):
+    def __init__(self, rankLookupTable, tracks, tracksUsed=None, homoRisk=False, config: GameConfig = DEFAULT_CONFIG):
         """
         Initializes the squad and populates it with Player instances.
 
@@ -21,27 +21,29 @@ class CribSquad:
             tracksUsed (list, optional): Specific track numbers to assign to players.
             homoRisk (bool): If True, all players receive the same baseline risk value (11).
                              If False, risks are randomized per player.
+            config (GameConfig): game configuration (defaults to the module-level DEFAULT_CONFIG)
         """
         self.players = []
         self.tracksUsed = tracksUsed
         self.homoRisk = homoRisk
+        self.config = config
 
         # Ensure tracks are assigned correctly to each player slot
-        if self.tracksUsed is None or len(self.tracksUsed) != gp.numplayers:
+        if self.tracksUsed is None or len(self.tracksUsed) != self.config.numplayers:
             self.tracksUsed = []
-            for p in range(gp.numplayers):
+            for p in range(self.config.numplayers):
                 if len(tracks) in (0, 1):
                     self.tracksUsed.append(0)
                 else:
                     self.tracksUsed.append(tracks[p].num)
 
         # Create the player instances
-        for i in range(0, gp.numplayers):
+        for i in range(0, self.config.numplayers):
             if homoRisk:
                 risk = 11
             else:
                 risk = r.randint(1, 21)
-            self.players.append(pl.Player(risk, i + 1, rankLookupTable, self.tracksUsed[i]))
+            self.players.append(pl.Player(risk, i + 1, rankLookupTable, self.tracksUsed[i], config=self.config))
 
     def resetRisks(self):
         """Re-randomizes risk levels for all players (unless homoRisk is enabled)."""

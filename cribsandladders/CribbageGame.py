@@ -4,7 +4,7 @@ from copy import deepcopy
 import cribsandladders.ScoreHand as sh
 
 from cribsandladders.Board import Board, Track, Chute, Ladder
-import game_params as gp
+from cribsandladders.config import GameConfig, DEFAULT_CONFIG
 from collections import Counter
 import bisect
 import random
@@ -61,11 +61,12 @@ class CribbageGame:
     dealing, pegging, scoring hands, and board movement.
     """
 
-    def __init__(self, board, squad, trial, threadNum=-1):
+    def __init__(self, board, squad, trial, threadNum=-1, config: GameConfig = DEFAULT_CONFIG):
         """Initializes game state and players."""
         self.board = board
         self.squad = squad
-        self.firstDeal = random.randint(1, gp.numplayers)
+        self.config = config
+        self.firstDeal = random.randint(1, self.config.numplayers)
         self.currentDealer = self.firstDeal
         self.verbose = False
         self.threadNum = threadNum
@@ -81,10 +82,10 @@ class CribbageGame:
         Returns:
             list: A list of Move objects recorded during the game.
         """
-        self.currentDealer = random.randint(1, gp.numplayers)
+        self.currentDealer = random.randint(1, self.config.numplayers)
         while not self.run_round():
             # NOTE: we put the +1 ouside the mod since players start at 1
-            self.currentDealer = (self.currentDealer) % gp.numplayers + 1
+            self.currentDealer = (self.currentDealer) % self.config.numplayers + 1
 
         if len(self.moves) > 0:
             self.moves[len(self.moves) - 1].winningMove = True
@@ -103,11 +104,11 @@ class CribbageGame:
         deck.shuffle()
         crib = []
 
-        if gp.cribstartsize > 0:
-            crib.extend(deck.drawCards(gp.cribstartsize))
+        if self.config.cribstartsize > 0:
+            crib.extend(deck.drawCards(self.config.cribstartsize))
 
         for player in self.squad.players:
-            player.deal_hand(deck, gp.dealsize)
+            player.deal_hand(deck, self.config.dealsize)
             crib.extend(player.discard_crib(player.num == self.currentDealer))
 
         # cut card
@@ -128,9 +129,9 @@ class CribbageGame:
             print("The cut card is the", card_to_string(cut_card))
 
         # Score hands starting with person to the L of the dealer
-        for i in range(gp.numplayers):
+        for i in range(self.config.numplayers):
             # +1 outside of mod since players start at 1 not 0
-            curScorer = (self.currentDealer + i) % gp.numplayers + 1
+            curScorer = (self.currentDealer + i) % self.config.numplayers + 1
             if self.score_hand(self.squad.getPlayerByNum(curScorer).hand, cut_card,
                                self.squad.getPlayerByNum(curScorer),
                                False):
@@ -219,10 +220,10 @@ class CribbageGame:
 
                 player.canPlay = False
                 # NOTE: we put the +1 ouside the mod since players start at 1
-                currentPlayerNum = (currentPlayerNum) % gp.numplayers + 1
+                currentPlayerNum = (currentPlayerNum) % self.config.numplayers + 1
                 cannotPlayCounter += 1
 
-                if cannotPlayCounter >= gp.numplayers:
+                if cannotPlayCounter >= self.config.numplayers:
                     # NOTE: we score 31 as 2, so no extra point
                     if total != 31 and self.score_points(1, "Last card", lastPlayedPlayer, True):
                         return True
@@ -268,7 +269,7 @@ class CribbageGame:
 
             lastPlayedPlayer = self.squad.getPlayerByNum(currentPlayerNum)
             # NOTE: we put the +1 ouside the mod since players start at 1
-            currentPlayerNum = (currentPlayerNum) % gp.numplayers + 1
+            currentPlayerNum = (currentPlayerNum) % self.config.numplayers + 1
 
     def score_pegging(self, seq, total, player, soexcite):
         """

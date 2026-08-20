@@ -1,3 +1,7 @@
+# Relocated from cribsandladders/test_deck.py during Phase 0/1 harness
+# work -- pytest's testpaths is scoped to tests/. No other changes.
+# Deck.py has zero heavy deps, so this file runs anywhere pytest does.
+
 import unittest
 import unittest.mock as mock
 from cribsandladders.Deck import Deck, Card
@@ -62,7 +66,6 @@ class TestDeck(unittest.TestCase):
 
         #then
         self.assertEqual(top_card, drawn_card)
-
 
 
 

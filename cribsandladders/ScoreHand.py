@@ -1,7 +1,7 @@
 import heapq
 from itertools import combinations
 import cribsandladders.Deck as dk
-import game_params as gp
+from cribsandladders.config import GameConfig, DEFAULT_CONFIG
 
 
 def score_hand(hand4cards, cutcard, is_crib=False):
@@ -204,10 +204,11 @@ def pairs(sorted5cards):
     return points
 
 
-def card_counts_list(pothand, potdiscard):
+def card_counts_list(pothand, potdiscard, config: GameConfig = DEFAULT_CONFIG):
     """
     :param pothand: a list of 4 cards the player is keeping
     :param potdiscard: a list of the 2 cards the player is planning to discard
+    :param config: game configuration (defaults to the module-level DEFAULT_CONFIG)
     :return:list of how many of each value are still in the 46 cards in the deck
     """
     card_counts = []
@@ -215,7 +216,7 @@ def card_counts_list(pothand, potdiscard):
     # existing 4 card flush
     for i in range(13):
         # Allow for 8 cards in 2 deck play
-        card_counts.append(gp.cardsperrank)
+        card_counts.append(config.cardsperrank)
     for card in pothand:
         value = card.rank
         card_counts[value - 1] -= 1
@@ -229,7 +230,7 @@ def card_counts_list(pothand, potdiscard):
     return card_counts
 
 
-def flush_adder(hand, discard, risk):
+def flush_adder(hand, discard, risk, config: GameConfig = DEFAULT_CONFIG):
     # NOTE: for performance, we are using additive products
     """
         Returns the value of a flush considering the discard cards
@@ -237,32 +238,34 @@ def flush_adder(hand, discard, risk):
         :param hand: a list of 4 cards the player is keeping
         :param discard: a list of the 2 cards the player is planning to discard
         :param risk: the risk the player is taking
+        :param config: game configuration (defaults to the module-level DEFAULT_CONFIG)
         :return: the value of the flush considering the discard cards
     """
     if hand[0].suit == hand[1].suit == hand[2].suit == hand[3].suit:
         # Factor in likelihood cut is also same suit
         if discard is dk.Card:
             if discard.suit == hand[0].suit:
-                return gp.flushmods[1][risk - 1]
+                return config.flushmods[1][risk - 1]
             else:
-                return gp.flushmods[0][risk - 1]
+                return config.flushmods[0][risk - 1]
         elif discard[0].suit == hand[0].suit:
             if len(discard) > 1 and discard[1].suit == hand[0].suit:
-                return gp.flushmods[2][risk - 1]
+                return config.flushmods[2][risk - 1]
             else:
-                return gp.flushmods[1][risk - 1]
+                return config.flushmods[1][risk - 1]
         else:
-            return gp.flushmods[0][risk - 1]
+            return config.flushmods[0][risk - 1]
 
     return 0.0
 
 
-def expected_hand_value(pothand, potdiscard, rankLookupTable, risk, hascrib):
+def expected_hand_value(pothand, potdiscard, rankLookupTable, risk, hascrib, config: GameConfig = DEFAULT_CONFIG):
     """
       Returns the expected point value of a hand (taking into account all possible cut cards)
       :param pothand: a list of 4 cards the player is keeping
       :param potdiscard: a list of the 1 or 2 cards the player is planning to discard
       :param risk: value between 1 and 21
+      :param config: game configuration (defaults to the module-level DEFAULT_CONFIG)
       :return: expected point value for the 4 card hand
       """
 
@@ -276,14 +279,14 @@ def expected_hand_value(pothand, potdiscard, rankLookupTable, risk, hascrib):
     # initiate sql conn & gen hashes
     handhash = int("{:02d}{:02d}{:02d}{:02d}".format(pothandsorted[0].rank, pothandsorted[1].rank,
                                                      pothandsorted[2].rank, pothandsorted[3].rank))
-    if gp.numplayers == 2:
+    if config.numplayers == 2:
         discardhash = int("{:02d}{:02d}".format(potdiscardsorted[0].rank, potdiscardsorted[1].rank))
     else:
         discardhash = int("{:02d}".format(potdiscardsorted[0].rank))
 
     # Retrieve modulation from dataframe
     aug_expected_value = rankLookupTable.loc[(handhash, discardhash, 1 if hascrib else 0), "ValR{}".format(risk)]
-    aug_expected_value += flush_adder(pothandsorted, potdiscardsorted, risk)
+    aug_expected_value += flush_adder(pothandsorted, potdiscardsorted, risk, config)
 
     return aug_expected_value
 

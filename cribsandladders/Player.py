@@ -1,12 +1,12 @@
 from cribsandladders.ScoreHand import expected_hand_value
+from cribsandladders.config import GameConfig, DEFAULT_CONFIG
 from copy import deepcopy
-import game_params as gp
 import scoretree as stcpp
 
 
 class Player():
 
-    def __init__(self, risk, num, rankLookupTable, tracknum=-1):
+    def __init__(self, risk, num, rankLookupTable, tracknum=-1, config: GameConfig = DEFAULT_CONFIG):
         """
         Initializes a player with a risk value, player number, and rank lookup table.
 
@@ -14,6 +14,7 @@ class Player():
         :param num: the player number
         :param rankLookupTable: the rank lookup table for the player
         :param tracknum: the track number for the player, defaults to -1
+        :param config: game configuration (defaults to the module-level DEFAULT_CONFIG)
         """
         self.tracknum = tracknum
         self.num = num
@@ -24,6 +25,7 @@ class Player():
         self.canPlay = True
         self.wins = 0
         self.rankLookupTable = rankLookupTable
+        self.config = config
 
     def deal_hand(self, deck, count):
         """
@@ -47,7 +49,7 @@ class Player():
         four_card_hands = self.get_possible_4_hands(self.hand)
         # num_four_card_hands =len(four_card_hands)
         for hand in four_card_hands:
-            value = expected_hand_value(hand.hand, hand.discard, self.rankLookupTable, self.risk, is_dealer)
+            value = expected_hand_value(hand.hand, hand.discard, self.rankLookupTable, self.risk, is_dealer, self.config)
             # Blend augmented and actual hand values as per risk tolerance
             # effvalue = abs(self.risk)*aug_value + (1.0 - abs(self.risk))*value
             # NOTE order them before performing lookup!
@@ -82,7 +84,7 @@ class Player():
         parallel_hand_set = set()
         for i in range(len(hand)):
             first_card = hand[i]
-            if gp.dealsize > 5:
+            if self.config.dealsize > 5:
                 for j in range(i + 1, len(hand)):
                     second_card = hand[j]
                     copyhand = deepcopy(hand)
@@ -122,7 +124,7 @@ class Player():
         seqMuxed = [c.muxed for c in sequence]
         resultMuxed = stcpp.getCardToPlay(handMuxed, nextPlayerCardsInHand, seqMuxed, effLandingForHoles,
                                           nextPlayerEffLandingForHoles, current_sum,
-                                          self.score, nextPlayerCurPos, gp.numdecks)
+                                          self.score, nextPlayerCurPos, self.config.numdecks)
         soexcite = resultMuxed >= 1000
         cardToPlayMuxed = resultMuxed % 1000
         if cardToPlayMuxed == 0:
