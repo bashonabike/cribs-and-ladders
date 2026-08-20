@@ -1,6 +1,6 @@
-#region Headers
+# region Headers
 from xml.dom import minidom
-#DO NOT MODIFY ABOVE HERE
+# DO NOT MODIFY ABOVE HERE
 ##################################################################################################
 
 import numpy as np
@@ -9,30 +9,29 @@ import sqlite3 as sql
 from io import StringIO
 from scipy.stats import norm
 
-
-#endregion
-#region Trial_Params
+# endregion
+# region Trial_Params
 ##################################################################################################
 
-#YOU CAN CHANGE THESE VALUES:
+# YOU CAN CHANGE THESE VALUES:
 
 twodecks = False
 numplayers = 3
-#Set to None if all tracks, otherwise tracks are 1 starting, enter list of ints
+# Set to None if all tracks, otherwise tracks are 1 starting, enter list of ints
 tracksused = None
-#tracksused = [1,2]
-#NOTE that realistically at least 100 trials are needed for any semblence of accuracy
+# tracksused = [1,2]
+# NOTE that realistically at least 100 trials are needed for any semblence of accuracy
 numtrials = 1000
-#NOTE: # logical cores minus 2 seems to be optimal
+# NOTE: # logical cores minus 2 seems to be optimal
 nummaxthreads = 2
-#OPTIONAL run multiple boards in a batch
+# OPTIONAL run multiple boards in a batch
 batchnum = 1
 boardname = "Micro Board 7"
 
-#Set if seeking optimal events layout
+# Set if seeking optimal events layout
 findmode = True
 eventenergyfile = "C:\\Users\\Dell 5290\\Documents\\cribs-and-ladders\\Boards\\MicroBoard1\\CURVES\\energy.svg"
-#TODO: nrg intensity curve?  going to be VERY track dependent, may struggle to converge
+# TODO: nrg intensity curve?  going to be VERY track dependent, may struggle to converge
 eventsovertimecurvefile = "C:\\Users\\Dell 5290\\Documents\\cribs-and-ladders\\Boards\\MicroBoard1\\CURVES\\eventsovertime.svg"
 eventlengthdisthistcurvefile = "C:\\Users\\Dell 5290\\Documents\\cribs-and-ladders\\Boards\\MicroBoard1\\CURVES\\event-length-dist-hist.svg"
 eventlengthovertimeidealcurve1file = "C:\\Users\\Dell 5290\\Documents\\cribs-and-ladders\\etc\\eventlengthovertimeidealcurve1.svg"
@@ -40,99 +39,95 @@ eventspacingsdisthistcurvefile = "C:\\Users\\Dell 5290\\Documents\\cribs-and-lad
 velocityovertimecurvefile = "C:\\Users\\Dell 5290\\Documents\\cribs-and-ladders\\Boards\\MicroBoard1\\CURVES\\velocity.svg"
 
 ####################################################################################
-#CANDIDATE SET GEN PARAMS
-minanglefromtracktangent = 30 #degrees
+# CANDIDATE SET GEN PARAMS
+minanglefromtracktangent = 30  # degrees
 maxloopyorthoeventdisplacementincrements = 12
 maxladderlength = 20
-eventminspacing = 5 #mm
+eventminspacing = 5  # mm
 maxeventlineext = 100
-mincrowvectordistcancel = 12 #mm, since straight line approx this equates to ~15mm curvy, need room to discernibly add lump on 1 side
-whenstartworryingaboutcancels = 12 #After this many cancels on a track, start impeding
+mincrowvectordistcancel = 12  # mm, since straight line approx this equates to ~15mm curvy, need room to discernibly add lump on 1 side
+whenstartworryingaboutcancels = 12  # After this many cancels on a track, start impeding
 probminimodeliters = 500
 allowabletwohits = 3
 onlysamedirtwohits = False
 maxtwohitnetgainloss = 25
-randomfeatheringamount = 9 #Nix holes randomly at nth interval to avoid endless opt loops
+randomfeatheringamount = 9  # Nix holes randomly at nth interval to avoid endless opt loops
 maxefflengthdisp = 24
-goodscorecutoffperc = 0.5 #percent, keep well below 1.0
-gamelengthtightness = 5  #This is exponent mantissa, probably best keep below 6, should be int for perf
+goodscorecutoffperc = 0.5  # percent, keep well below 1.0
+gamelengthtightness = 5  # This is exponent mantissa, probably best keep below 6, should be int for perf
 idealcancelspct = 0.75
-finishlinelength = 15 #Number of holes that can be left free from events at end
+finishlinelength = 15  # Number of holes that can be left free from events at end
 # (ideally stick these bits in parallel on board so all trax side by side)
 
-#OPTIMIZER BOUNDING PARAMS
+# OPTIMIZER BOUNDING PARAMS
 maxeventsetfinesseiters = 10
 maxeventsettrials = 100
 maxitersconvergeoneventtrialset = 400
 maxitertrynewbuild = 400
 maxitertrackstalled = 20
-minqualityboardlengthmatching = 1.5 #Try to get within this many holes of ideal
+minqualityboardlengthmatching = 1.5  # Try to get within this many holes of ideal
 minqualityboardlengthintervalsrpt = 0.005
 
-#OPTIMIZER BALANCING PARAMS
-#NOTE: changing these will require code changes!!!
-effectiveboardlength = 120 #try to achieve parity with normal board
+# OPTIMIZER BALANCING PARAMS
+# NOTE: changing these will require code changes!!!
+effectiveboardlength = 120  # try to achieve parity with normal board
 
-#OPTIMIZER OUTPUT PARAMS
+# OPTIMIZER OUTPUT PARAMS
 numbestpickstooutput = 5
 testtotraindataratio_bnds = (0.2, 0.3, False)
 trainrandomstate_bnds = (38, 44, True)
-trainlearningrate_bnds=(0.01, 0.1, False)
-trainnumestimators_bnds=(50, 300, True)
+trainlearningrate_bnds = (0.01, 0.1, False)
+trainnumestimators_bnds = (50, 300, True)
 ####################################################################################
 
 
 ####################################################################################
-#EVALUATOR PARAMS
+# EVALUATOR PARAMS
 idealgamelength = 12
 opttwohitspct = 0.01
 optorthospct = 0.2
 optmultispct = 0.05
 
-
 ##################################################################################################
 
 ##################################################################################################
-#Iterative optimizer params
+# Iterative optimizer params
 changebaseincrperiter = 0.01
 iterscorecutoff = 2
-prescorecutoff =  2.5
+prescorecutoff = 2.5
 maxnumitermodeliters = 1000
 
+##################################################################################################
+# endregion
+# region xml_parser
 
 
 ##################################################################################################
-#endregion
-#region xml_parser
-
-
-##################################################################################################
-#DO NOT MODIFY BELOW THIS LINE!!
+# DO NOT MODIFY BELOW THIS LINE!!
 
 flushmods = np.zeros((3, 21), dtype=float).tolist()
 
 if not twodecks:
-    unknowncardsafterdeal = 46 #52 minus 6 card deal
+    unknowncardsafterdeal = 46  # 52 minus 6 card deal
     numdecks = 1
     cardsperrank = 4
-    flushmods[0][10] = 4+(13.0-4.0)/52.0
-    flushmods[1][10] = 4+(13.0-5.0)/52.0
-    flushmods[2][10] = 4+(13.0-6.0)/52.0
+    flushmods[0][10] = 4 + (13.0 - 4.0) / 52.0
+    flushmods[1][10] = 4 + (13.0 - 5.0) / 52.0
+    flushmods[2][10] = 4 + (13.0 - 6.0) / 52.0
 else:
-    unknowncardsafterdeal = 98 #52*2 minus  6 card deal
+    unknowncardsafterdeal = 98  # 52*2 minus  6 card deal
     numdecks = 2
     cardsperrank = 8
-    flushmods[0][10] = 4+(13.0-4.0)/(52.0*2)
-    flushmods[1][10]= 4+(13.0-5.0)/(52.0*2)
-    flushmods[2][10]= 4+(13.0-6.0)/(52.0*2)
+    flushmods[0][10] = 4 + (13.0 - 4.0) / (52.0 * 2)
+    flushmods[1][10] = 4 + (13.0 - 5.0) / (52.0 * 2)
+    flushmods[2][10] = 4 + (13.0 - 6.0) / (52.0 * 2)
 
-for d in range(0,3):
-    for r in range(0,21):
+for d in range(0, 3):
+    for r in range(0, 21):
         if r < 10:
-            flushmods[d][r] = ((r+1)/10.0)*math.sqrt(flushmods[d][10]) + (1 - (r+1)/10.0)*flushmods[d][10]
+            flushmods[d][r] = ((r + 1) / 10.0) * math.sqrt(flushmods[d][10]) + (1 - (r + 1) / 10.0) * flushmods[d][10]
         elif r > 10:
-            flushmods[d][r] = ((20-r) / 10.0) * flushmods[d][10] + ((r -10) / 10.0) * math.pow(flushmods[d][10],2)
-
+            flushmods[d][r] = ((20 - r) / 10.0) * flushmods[d][10] + ((r - 10) / 10.0) * math.pow(flushmods[d][10], 2)
 
 probHandHist, probPegHist = [], []
 if numplayers == 2:
@@ -298,9 +293,9 @@ elif numplayers == 3:
 else:
     raise Exception(str(numplayers) + " player play is not configured yet")
 
-#Det norm distr of avg moves per pegging for markov chain mini-model
-maxVal = math.floor(2*avgMovesPerPegging)
-list_pos = list(range(1, maxVal+1))
+# Det norm distr of avg moves per pegging for markov chain mini-model
+maxVal = math.floor(2 * avgMovesPerPegging)
+list_pos = list(range(1, maxVal + 1))
 mean = avgMovesPerPegging
 std_dev = 1.0
 probabilities = norm.pdf(list_pos, loc=mean, scale=std_dev)
@@ -308,22 +303,21 @@ probabilities /= np.sum(probabilities)
 prob_l = probabilities.tolist()
 probPegRounds = [dict(rounds=r[0], prob=r[1]) for r in zip(list_pos, prob_l)]
 
-
-#Pre-create stub for inserting into stats
+# Pre-create stub for inserting into stats
 sqliteConn = sql.connect('Boards/AllBoards.db')
 sqliteCursor = sqliteConn.cursor()
 
-#Prepend columns to write to, all except auto-incrementing Stat_ID
+# Prepend columns to write to, all except auto-incrementing Stat_ID
 retrievestatcolumnsquery = "SELECT name FROM pragma_table_info(\'Stat\') as tblInfo"
 sqliteCursor.execute(retrievestatcolumnsquery)
 result = sqliteCursor.fetchall()
 result.remove(('Stat_ID',))
 insertstatquery_sb = StringIO()
 insertstatquery_sb.write("INSERT INTO Stat (")
-insertstatquery_sb.write("".join([c[0]+"," for c in result])[:-1])
+insertstatquery_sb.write("".join([c[0] + "," for c in result])[:-1])
 insertstatquery_sb.write(") Values (")
 insertstatstub = insertstatquery_sb.getvalue()
 insertstatquery_sb.close()
 
 ##################################################################################################
-#endregion
+# endregion

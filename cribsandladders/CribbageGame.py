@@ -1,26 +1,25 @@
 from cribsandladders.Deck import Deck, card_to_string, peg_val
 from cribsandladders.Stats import Move
 from copy import deepcopy
-#from cribsandladders.ScoreHand as sh import score_hand
 import cribsandladders.ScoreHand as sh
 
-from cribsandladders.CribSquad import CribSquad
 from cribsandladders.Board import Board, Track, Chute, Ladder
 import game_params as gp
 from collections import Counter
 import bisect
 import random
 import Enums as en
-import cribsandladders.Deck as dk
-import time as tm
 import itertools as it
-
 
 PAIR_SCORES = {2: ("Pair", 2), 3: ("3 of a kind", 6), 4: ("Four of a kind", 12)}
 
+
 def min_card(hand):
     """
-    :returns a card with the minimum pegging value
+    Finds the card in the hand with the lowest pegging value.
+
+    Returns:
+        Card: The card with the minimum peg_val.
     """
     c = hand[0]
     for i in range(1, len(hand)):
@@ -31,16 +30,24 @@ def min_card(hand):
 
 def min_card_val(hand):
     """
-    :returns the pegging value of the minimum card
+    Gets the lowest pegging value available in a hand.
+
+    Returns:
+        int: The minimum pegging value.
     """
     return min([peg_val(c) for c in hand])
 
 
 def can_peg(hand, total):
     """
-    :returns true if a hand has a card that can be played
-    :param hand: the hand to evaluate
-    :param total: the total score on the table
+    Checks if any card in the hand can be played without exceeding 31.
+
+    Args:
+        hand (list): Current cards in player's hand.
+        total (int): Current running pegging total.
+
+    Returns:
+        bool: True if a play is possible, False otherwise.
     """
     if len(hand) == 0:
         return False
@@ -50,12 +57,12 @@ def can_peg(hand, total):
 
 class CribbageGame:
     """
-    A game of cribsandladders
-    The game is run by calling play_game()
-    The game can only be run once.
-    To disable most of the printout, set game.verbose to false
+    Manages the lifecycle of a single Cribbage game session, including
+    dealing, pegging, scoring hands, and board movement.
     """
+
     def __init__(self, board, squad, trial, threadNum=-1):
+        """Initializes game state and players."""
         self.board = board
         self.squad = squad
         self.firstDeal = random.randint(1, gp.numplayers)
@@ -69,26 +76,27 @@ class CribbageGame:
 
     def play_game(self):
         """
-        The main gameplay function
-        To get the scores post game, check game.a_score and game.b_score
+        The main gameplay loop. Rotates dealers and runs rounds until a winner is found.
+
+        Returns:
+            list: A list of Move objects recorded during the game.
         """
         self.currentDealer = random.randint(1, gp.numplayers)
         while not self.run_round():
-            #NOTE: we put the +1 ouside the mod since players start at 1
+            # NOTE: we put the +1 ouside the mod since players start at 1
             self.currentDealer = (self.currentDealer) % gp.numplayers + 1
 
         if len(self.moves) > 0:
             self.moves[len(self.moves) - 1].winningMove = True
         return self.moves
 
-
     def run_round(self):
         """
-        Runs a round of cribsandladders between player[] and player[]
-        :param a_is_dealer: if a is the dealer and gets the crib
-        :return: true if the game was won, false if otherwise
-        """
+        Executes a full round of Cribbage: Dealing, Discarding, Pegging, and Counting.
 
+        Returns:
+            bool: True if a player reached the winning position during the round.
+        """
         # setup
         self.round += 1
         deck = Deck()
@@ -121,14 +129,15 @@ class CribbageGame:
 
         # Score hands starting with person to the L of the dealer
         for i in range(gp.numplayers):
-            #+1 outside of modsince players start at 1 not 0
+            # +1 outside of mod since players start at 1 not 0
             curScorer = (self.currentDealer + i) % gp.numplayers + 1
-            if self.score_hand(self.squad.getPlayerByNum(curScorer).hand, cut_card, self.squad.getPlayerByNum(curScorer),
-                            False):
+            if self.score_hand(self.squad.getPlayerByNum(curScorer).hand, cut_card,
+                               self.squad.getPlayerByNum(curScorer),
+                               False):
                 return True
 
         # score the crib
-        if self.score_hand(crib, cut_card,self.squad.getPlayerByNum(self.currentDealer), True):
+        if self.score_hand(crib, cut_card, self.squad.getPlayerByNum(self.currentDealer), True):
             return True
 
         self.print_scores()
@@ -136,31 +145,36 @@ class CribbageGame:
 
         return False
 
-
     def calc_metrics(self):
-        #TODO replace me
-        #Determine repeated chutes & ladders
+        """
+        Calculates post-game metrics such as frequency of landing on chutes or ladders.
+        """
+        # TODO replace me
+        # Determine repeated chutes & ladders
         events_by_player = ([group for group in zip(self.player, self.chutehit, self.ladderhit)
                              if group != ('A', (0, 0), (0, 0)) and group != ('B', (0, 0), (0, 0))])
         event_counts = Counter(events_by_player)
         self.eventRepeats = len(events_by_player) - len(event_counts)
 
-
-
     def print_scores(self):
+        """Prints current player scores to console if verbose mode is enabled."""
         if self.verbose:
             for p in self.squad.players:
                 print("Player 1 score: {} ".format(p.score))
-
             print("\n")
 
-    def score_points(self, amount, reason, player, pegMove, soexcite = False):
+    def score_points(self, amount, reason, player, pegMove, soexcite=False):
         """
-        scores points for a player
-        :param amount: the amount of points scored
-        :param reason: the reason for the points as a string. Prints in the format of (amount) for (reason)
-        :param is_a: if the player who scored points was a
-        :param player: player getting scored
+        Updates a player's score and checks for board events (chutes/ladders).
+
+        Args:
+            amount (int): Points earned.
+            reason (str): Label for the points (e.g., "15-2").
+            player (Player): The player receiving points.
+            pegMove (bool): Whether points were scored during pegging.
+
+        Returns:
+            bool: True if the player has won the game.
         """
         if amount == 0:
             return False
@@ -168,7 +182,7 @@ class CribbageGame:
         curTrack = self.board.getTrackByNum(player.tracknum)
         newPos, event = self.checkChuteOrLadderForPos(curTrack, amount, player.score)
         self.moveNum += 1
-        #event: 0 is non, 1 is chute, 2 is ladder
+        # event: 0 is non, 1 is chute, 2 is ladder
         self.moves.append(Move(self.threadNum, self.trial, curTrack, self.moveNum, self.round, player.num, player.score,
                                amount, reason, event, newPos, soexcite, pegMove))
         player.score = newPos
@@ -180,13 +194,11 @@ class CribbageGame:
 
     def pegging(self):
         """
-        :param hand_a: the hand of player a. Must be a copy/mutable
-        :param hand_b: the hand of player b. Must be a copy/mutable
-        :param is_a: a starts the pegging
-        :returns true if the game was won
+        Manages the pegging phase where players play cards sequentially to reach 31.
+
+        Returns:
+            bool: True if a player wins during this phase.
         """
-        #
-        # next_player = hand_b if a_goes_first else hand_a
         total = 0
         seq = []
         currentPlayerNum = self.currentDealer
@@ -206,12 +218,12 @@ class CribbageGame:
                     break
 
                 player.canPlay = False
-                #NOTE: we put the +1 ouside the mod since players start at 1
-                currentPlayerNum = (currentPlayerNum) % gp.numplayers +  1
+                # NOTE: we put the +1 ouside the mod since players start at 1
+                currentPlayerNum = (currentPlayerNum) % gp.numplayers + 1
                 cannotPlayCounter += 1
 
                 if cannotPlayCounter >= gp.numplayers:
-                    #NOTE: we score 31 as 2, so no extra point
+                    # NOTE: we score 31 as 2, so no extra point
                     if total != 31 and self.score_points(1, "Last card", lastPlayedPlayer, True):
                         return True
                     if self.squad.donePegging():
@@ -232,14 +244,14 @@ class CribbageGame:
                 nextPlayerCardsInHand = len(nextPlayer.pegginghand)
                 nextPlayerCurrPos = nextPlayer.score
             (pickMuxed, soexcite) = player.pegging_move(deepcopy(seq), total, curTrack.effLandingForHoles,
-                                                   nextPlayerEffHoles_l, nextPlayerCardsInHand, nextPlayerCurrPos)
+                                                        nextPlayerEffHoles_l, nextPlayerCardsInHand, nextPlayerCurrPos)
             pick = None
             for card in player.pegginghand:
                 if card.muxed == pickMuxed:
                     pick = card
                     break
 
-            # a card should be played
+            # validate move
             if pick is None:
                 raise IllegalMoveException("Must play a card if able to. data:" + str(
                     (deepcopy(player.pegginghand), deepcopy(seq), total)) + "   player " + str(player.num))
@@ -247,6 +259,7 @@ class CribbageGame:
                 raise IllegalMoveException("Must play a card from your hand")
             if peg_val(pick) + total > 31:
                 raise IllegalMoveException("Cannot play a card resulting in a sum over 31")
+
             seq.append(pick)
             player.pegginghand.remove(pick)
             total += peg_val(pick)
@@ -254,16 +267,20 @@ class CribbageGame:
                 return True
 
             lastPlayedPlayer = self.squad.getPlayerByNum(currentPlayerNum)
-            #NOTE: we put the +1 ouside the mod since players start at 1
-            currentPlayerNum = (currentPlayerNum)%gp.numplayers + 1
+            # NOTE: we put the +1 ouside the mod since players start at 1
+            currentPlayerNum = (currentPlayerNum) % gp.numplayers + 1
 
     def score_pegging(self, seq, total, player, soexcite):
         """
-        Scores a single play in pegging
-        :param seq:
-        :param total:
-        :param is_a:
-        :return:
+        Evaluates the current pegging sequence for runs, pairs, and totals (15/31).
+
+        Args:
+            seq (list): The sequence of cards played in the current "Go".
+            total (int): Running total of card values.
+            player (Player): Player who just played.
+
+        Returns:
+            bool: Result of score_points (True if player wins).
         """
         pegScore = 0
         card = seq[-1]
@@ -307,18 +324,28 @@ class CribbageGame:
         return False
 
     def pegging_round(self, hand_a, hand_b, a_goes_first):
+        """Placeholder for specific pegging round logic if needed."""
         pass
 
-    def score_hand(self, hand4cards, cutcard, player, is_crib = False):
+    def score_hand(self, hand4cards, cutcard, player, is_crib=False):
         """
-        scores points from a given hand
-        :param hand4cards: the hand's cards
-        :param cutcard: the cut card
-        :return:
+        Calculates and applies score for a player's static hand or crib.
         """
         return self.score_points(sh.score_hand(hand4cards, cutcard, is_crib), "Their cards", player, False)
 
     def checkChuteOrLadderForPos(self, track, prospScore, currPos):
+        """
+        Checks if landing on a specific square triggers a chute (slide back)
+        or a ladder (climb forward).
+
+        Args:
+            track (Track): The track the player is on.
+            prospScore (int): The points they are about to move.
+            currPos (int): Current position on board.
+
+        Returns:
+            tuple: (new_position, event_type)
+        """
         if prospScore == 0:
             return currPos + prospScore, en.Event.NONE
 
@@ -335,6 +362,6 @@ class CribbageGame:
         return currPos + prospScore, en.Event.NONE
 
 
-
 class IllegalMoveException(Exception):
+    """Raised when a player attempts an invalid Cribbage move."""
     pass

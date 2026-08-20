@@ -1,10 +1,21 @@
 from xml.dom import minidom
 import game_params as gp
-import math as mt
-import os
-import cribsandladders.PossibleEvents as ps
 
+#########################
+#Public methods
+#########################
 def setTrackHolesets(tracks, boardHeight, twoDeckLineBoardPath = ""):
+    """
+    Sets the track holesets for each track in the given list of tracks.
+
+    Args:
+        tracks (list): List of Track objects.
+        boardHeight (int): Height of the board.
+        twoDeckLineBoardPath (str, optional): Path to the two deck line board file. Defaults to "".
+
+    Returns:
+        None
+    """
     twoDeckLinePath = None
     if not twoDeckLineBoardPath in ("", None):
         twoDeckLinePath =svgParserVectors(twoDeckLineBoardPath, boardHeight)[0]
@@ -15,26 +26,24 @@ def setTrackHolesets(tracks, boardHeight, twoDeckLineBoardPath = ""):
 
         #REMOVED two deck line since 2 decks don really speed up the game much
         if gp.findmode:
-            # if twoDeckLinePath is not None:
-            #     # track.twodeckslength = len(track.trackholes)
-            #     # trackVectors =  build_interception_test_vector_set([h.coords for h in track.trackholes])
-            #     # closestPointCoords = check_intersections( trackVectors, [twoDeckLinePath])
-            #     # closestPoint = track.getHoleByCoords(closestPointCoords).num
-            #     # if closestPoint == -1:
-            #     #     raise Exception ("Two Deck Line does not intersect Track {}".format(track.num))
-            #     # track.length = closestPoint
-            #     # track.efflength = track.twodeckslength if gp.twodecks else track.length
-            # else:
-            #     track.length = len(track.holeset)
-            #     track.efflength = track.length
-
             track.length = len(track.trackholes)
             track.efflength = track.length
             track.twodeckslength = track.length
 
 
 def svgParserHoles(svgFilePath, boardHeight = -1, tracknum = -1, returnRawCoords = False):
-    # parse an xml file by name
+    """
+    Parses an SVG file and extracts the coordinates of the holes.
+
+    Args:
+        svgFilePath (str): Path to the SVG file.
+        boardHeight (int, optional): Height of the board. Defaults to -1.
+        tracknum (int, optional): Number of the track. Defaults to -1.
+        returnRawCoords (bool, optional): Whether to return raw coordinates or Hole objects. Defaults to False.
+
+    Returns:
+        list or tuple: List of Hole objects or tuple of raw coordinates.
+    """
     board_xml_file=minidom.parse(svgFilePath)
     holes = []
     allcoords = []
@@ -64,7 +73,16 @@ def svgParserHoles(svgFilePath, boardHeight = -1, tracknum = -1, returnRawCoords
     else:
         return allcoords
 def svgParserVectors(svgFilePath, boardHeight):
-    # parse an xml file by name
+    """
+    Parses an SVG file and extracts the coordinates of the vectors.
+
+    Args:
+        svgFilePath (str): Path to the SVG file.
+        boardHeight (int): Height of the board.
+
+    Returns:
+        list: List of tuples representing the coordinates of the vectors.
+    """
     board_xml_file=minidom.parse(svgFilePath)
     vectors = []
     for svg_path in board_xml_file.getElementsByTagName('path'):
@@ -79,13 +97,6 @@ def svgParserVectors(svgFilePath, boardHeight):
 
     return vectors
 
-def ccw(A, B, C):
-    return (C[1] - A[1]) * (B[0] - A[0]) > (B[1] - A[1]) * (C[0] - A[0])
-
-# Return true if line segments AB and CD intersect
-def intersect(vec1, vec2):
-    return (ccw(vec1[0], vec2[0], vec2[1]) != ccw(vec1[1], vec2[0], vec2[1]) and
-            ccw(vec1[0], vec1[1], vec2[0]) != ccw(vec1[0], vec1[1], vec2[1]))
 
 def check_intersections(test_path_set, possible_intercepts_set):
     """
@@ -101,7 +112,7 @@ def check_intersections(test_path_set, possible_intercepts_set):
 
     for vector1 in test_path_set:
         for vector2 in possible_intercepts_set:
-            if intersect(vector1, vector2):
+            if _intersect(vector1, vector2):
                 return vector1[0]
     return -1
 
@@ -130,6 +141,18 @@ def build_interception_test_vector_set(main_set):
     return vectors
 
 
+#########################
+#Private methods
+#########################
+def _ccw(A, B, C):
+    return (C[1] - A[1]) * (B[0] - A[0]) > (B[1] - A[1]) * (C[0] - A[0])
+
+# Return true if line segments AB and CD intersect
+def _intersect(vec1, vec2):
+    return (_ccw(vec1[0], vec2[0], vec2[1]) != _ccw(vec1[1], vec2[0], vec2[1]) and
+            _ccw(vec1[0], vec1[1], vec2[0]) != _ccw(vec1[0], vec1[1], vec2[1]))
+
+
 class Hole:
     def __init__(self, x, y, num, tracknum, lastHole=False):
         self.coords = (x, y)
@@ -139,6 +162,3 @@ class Hole:
 
     def __hash__(self):
         return hash(self.coords)
-
-    # def __str__(self):
-    #     return str(vars(self))
