@@ -1,0 +1,26 @@
+# Test harness only. Install with:
+#   pip install -r requirements-dev.txt
+pytest>=7.0
+pytest-cov>=4.0
+
+# --------------------------------------------------------------------------
+# Runtime deps required to import the full cribsandladders package (needed
+# for anything beyond tests/test_smoke.py and Tier-1 modules like Enums.py
+# and Deck.py). None of these are pinned yet -- add versions here as you
+# confirm what you're actually running with.
+#
+#   pandas
+#   numpy
+#   scipy
+#   ezdxf
+#   shapely
+#   seaborn
+#   matplotlib
+#   mystic
+#
+# Plus two local compiled pybind11 extensions that aren't on PyPI and must
+# be built from source in this repo before Player.py / EventSetBuilder.py
+# (and anything importing them) will import:
+#   - scoretree   (build via ScoreTreeTry2/setup.py)
+#   - markovgame  (build via MarkovBind/setup.py)
+# --------------------------------------------------------------------------

@@ -1,0 +1,21 @@
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "unit: fast, no I/O, no heavy deps beyond what's already importable",
+    "integration: exercises DB/filesystem/matplotlib or the compiled C++ extensions (scoretree, markovgame)",
+]
+addopts = "-ra --strict-markers"
+
+[tool.coverage.run]
+source = ["cribsandladders"]
+omit = [
+    "*/pybind11/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
