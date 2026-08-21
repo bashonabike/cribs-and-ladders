@@ -44,8 +44,8 @@ extensions). `pytest -m integration` is the rest.
     redesigning the illegal-move test into two that actually exercise
     the intended branches.
   - `test_eventsetbuilder.py` -- needs numpy + pandas (via
-    `cribsandladders.Board`) to import; not yet updated for config
-    injection since `EventSetBuilder` is Phase 4 scope.
+    `cribsandladders.Board`) to import. Updated in Phase 4 for config
+    injection -- see the Phase 4 section below.
 - `test_player.py`, `test_crib_squad.py` -- Phase 2, done.
 - `test_board.py`, `test_base_layout.py`, `test_board_setter.py`,
   `test_dxf_writer.py` -- Phase 3, done. What each covers:
@@ -100,7 +100,78 @@ extensions). `pytest -m integration` is the rest.
     `pytest.importorskip("ezdxf")` so it skips cleanly if ezdxf isn't
     installed rather than failing collection.
 - `test_optimizer.py`, `test_possible_events.py`, `test_evaluator.py`,
-  `test_stats.py` -- Phase 4.
+  `test_stats.py`, `test_eventsetbuilder.py` -- Phase 4 (Optimizer/
+  board-design subsystem), done except for one explicitly deferred piece.
+  `PossibleEvents`, `Stats`, `Evaluator`, `Optimizer`, and
+  `EventSetBuilder` all moved off `game_params` onto an injected
+  `config: GameConfig` (same pattern as earlier phases), and each had its
+  heavy/optional imports (`scipy`, `lightgbm`, two `sklearn` submodules,
+  `markovgame`) moved from module scope into the one method that actually
+  uses them, so the rest of each module imports and is testable without
+  those packages installed. What each file covers:
+  - `test_possible_events.py` -- the geometry helpers (`ccw`, `intersect`,
+    `orientation`, `doIntersect`, bounding-box/angle math) were already
+    pure, just untested. `hydrate_candidate_events_from_dataframe` is a
+    new pure method pulled out of `tryRetrieveCache`'s DB-cache-hit path
+    (same idea as Phase 3's `hydrate_tracks_from_dataframes`), tested
+    with small hand-built DataFrames instead of a real cache db. Also
+    fixed a hardcoded `'Boards/AllBoards.db'` path to use
+    `config.db_path`.
+  - `test_stats.py` -- `build_insert_stat_stub` is a new pure function
+    pulled out of the raw-SQL-building logic in `insertStatsRecord`.
+    `calc_metrics`/`insertStatsRecord`/`print_metrics`/`print_temp_maps`
+    now read from injected config instead of `game_params`; the sqlite
+    path is `config.db_path` instead of a literal. Two pre-existing bugs
+    were found and documented (with a TODO in the source and a
+    characterization test expecting the `AttributeError`, not fixed --
+    game-logic/plotting bugs are out of scope for this phase): `print_metrics`
+    references `self.soexcites_pegs`/`self.lengths_in_rounds`, which
+    aren't set anywhere on `Stats`; `print_temp_maps` calls
+    `.groupby('track').to_list('track')`, which isn't a real
+    `DataFrameGroupBy` method.
+  - `test_evaluator.py` -- `Evaluator.__init__` does no I/O, so it's
+    constructed directly with small fake `EventSetBuilder`/`Board`/`Track`
+    stand-ins rather than needing `object.__new__`. Covers config-injected
+    scoring in `detMetrics(onlyGameBoardStats=True)` (orthos/multis/cancels
+    targets, negative-cancels clamping, early-termination against
+    `config.finishlinelength`) and the full `CurveOptimizer` class
+    (`find_optimal_scale_analytical`, `apply_scaling`,
+    `least_squares_difference`, zero-denominator handling). One
+    `@pytest.mark.integration` test uses `pytest.importorskip("scipy")`
+    for `find_optimal_scale`, the one method that still needs scipy
+    (moved from module scope into that method only).
+  - `test_optimizer.py` -- `Optimizer.__init__` opens a real sqlite
+    connection and runs queries, so most methods are tested via
+    `object.__new__(Optimizer)` with just the attributes each method
+    reads set by hand (same pattern as `test_possible_events.py`). Covers
+    `setParamFromBounds`, `detWeighedScoring`, `getFminStarterParams`,
+    `getFminBounds`, `setupFminParamsList`, and `runIncrIteration`
+    (verified against a hand-computed expected value, that it scales
+    proportionally with `config.changebaseincrperiter`, and that
+    out-of-bounds results clamp instead of crashing). One
+    `@pytest.mark.integration` test builds a temp sqlite db with the
+    `OptimizerParamPairings`/`BoardTrackHints` schema and exercises
+    `__init__`/`retrievePairingsSettings` end-to-end. The db path is now
+    `config.optimizer_db_path` instead of a hardcoded
+    `'etc/Optimizer.db'` literal.
+  - `test_eventsetbuilder.py` -- rewritten for config injection.
+    `retrieveOrGenerateBenchmarkMoves` is mocked out in `setUp` (the real
+    repo's `etc/Optimizer.db` hit a sandbox-specific disk I/O error
+    unrelated to this migration) so `EventSetBuilder` can be constructed
+    without a live db. Nine hardcoded `'etc/Optimizer.db'` literals
+    scattered across `EventSetBuilder`/`ParamSet`/`OrthoLineTrace` were
+    all routed through `config.optimizer_db_path`, with a regression test
+    (`test_monte_carlo_reads_from_configured_db_path_not_hardcoded_one`)
+    pinning that down. `test_try_event_set` is skipped with an explicit
+    reason (`track1.candidateEvents` is `None` in the shared fixture, a
+    pre-existing gap flagged by the original author's own TODO, unrelated
+    to this migration) rather than papered over.
+  - **Not done, by explicit scoping decision**: `EventSetBuilder.py` is
+    2600+ lines and still one god class -- decomposing it into smaller,
+    independently-testable units was scoped out of Phase 4 as a distinct,
+    deeper design task rather than rushed. Config injection and the
+    import-hygiene/persistence-path fixes above were still applied to it,
+    but its internals are otherwise unchanged.
 - `test_integration_*.py` -- Phase 5.
 
 ## Fixtures

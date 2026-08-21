@@ -1,11 +1,19 @@
 # TODO: ensure all the following are evaluated: balance, # distribution of events, # regression fitting of events over time to ideal curve, # fit of the other curves, # game length (maybe allow chute cancelling), # 2-hits (maybe fit curve?), # So excite, # repeats, # minimize othos, # maximize multis
 import statistics as stt
-import game_params as gp
 import math
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.optimize import minimize
+from cribsandladders.config import GameConfig, DEFAULT_CONFIG
+
+# NOTE: scipy.optimize.minimize is imported lazily inside
+# CurveOptimizer.find_optimal_scale (the only place it's used) instead
+# of at module scope. discreteRegression -- the only call site in this
+# file -- actually calls find_optimal_scale_analytical, the closed-form
+# numpy-only alternative below, so scipy was never on the hot path for
+# anything currently exercised; it was just an import-time tax on this
+# whole module. This mirrors the Phase 2 fix to Player.py's scoretree
+# import and the Phase 4 fix to EventSetBuilder.py's markovgame import.
 
 
 class Evaluator:
@@ -14,7 +22,8 @@ class Evaluator:
     gameplay simulation results, and regression fitting against ideal game curves.
     """
 
-    def __init__(self, eventSetBuilder, board, possibleEvents, stats, sqlOptimizerCon, optimizerRunSet, optimizerRun):
+    def __init__(self, eventSetBuilder, board, possibleEvents, stats, sqlOptimizerCon, optimizerRunSet, optimizerRun,
+                 config: GameConfig = DEFAULT_CONFIG):
         self.eventSetBuilder = eventSetBuilder
         self.board = board
         self.possibleEvents = possibleEvents
@@ -24,6 +33,7 @@ class Evaluator:
         self.sqlOptimizerCon = sqlOptimizerCon
         self.optimizerRunSet = optimizerRunSet
         self.optimizerRun = optimizerRun
+        self.config = config
         self.results = []
 
     def lossFunction(self):
@@ -50,23 +60,23 @@ class Evaluator:
         """
         # GAME BOARD STRUCTURE SCALAR STATS
         if self.eventSetBuilder.events > 0:
-            orthos = abs(gp.optorthospct - self.eventSetBuilder.orthos / self.eventSetBuilder.events)
-            orthosit = gp.optorthospct - self.eventSetBuilder.orthos / self.eventSetBuilder.events
+            orthos = abs(self.config.optorthospct - self.eventSetBuilder.orthos / self.eventSetBuilder.events)
+            orthosit = self.config.optorthospct - self.eventSetBuilder.orthos / self.eventSetBuilder.events
         else:
-            orthos, orthosit = gp.optorthospct, gp.optorthospct
+            orthos, orthosit = self.config.optorthospct, self.config.optorthospct
         self.results.append(dict(Result = "orthos", ResultFlavour = "GAME BOARD STRUCTURE SCALAR STATS",
                                  ResultValue = orthos, ResultValueIterative = orthosit, Weighting = 0.5))
 
         if self.eventSetBuilder.events > 0:
-            multis = abs(gp.optmultispct - self.eventSetBuilder.multis / self.eventSetBuilder.events)
-            multisit = gp.optmultispct - self.eventSetBuilder.multis / self.eventSetBuilder.events
+            multis = abs(self.config.optmultispct - self.eventSetBuilder.multis / self.eventSetBuilder.events)
+            multisit = self.config.optmultispct - self.eventSetBuilder.multis / self.eventSetBuilder.events
         else:
-            multis, multisit = gp.optmultispct, gp.optmultispct
+            multis, multisit = self.config.optmultispct, self.config.optmultispct
         self.results.append(dict(Result = "multis", ResultFlavour = "GAME BOARD STRUCTURE SCALAR STATS",
                                  ResultValue = multis, ResultValueIterative = multisit, Weighting = 1))
 
         if self.eventSetBuilder.events > 0:
-            cancels = (self.eventSetBuilder.cancels / self.eventSetBuilder.events) - gp.idealcancelspct
+            cancels = (self.eventSetBuilder.cancels / self.eventSetBuilder.events) - self.config.idealcancelspct
             # If too few cancels, don't sweat it, muchks with iter model
             if cancels < 0:
                 cancels = 0
@@ -79,7 +89,7 @@ class Evaluator:
             track = self.board.getTrackByNum(n['tracknum'])
             track_id = track.Track_ID
             maxNode = max(n['nodes'])
-            termPct = min(maxNode / (track.length - gp.finishlinelength), 1.0)
+            termPct = min(maxNode / (track.length - self.config.finishlinelength), 1.0)
             self.results.append(dict(Result = "earlytermination_T{}".format(track_id), ResultFlavour = "GAMEPLAY SCALAR STATS",
                                      ResultValue = 1.0 - termPct, Weighting = 8))
 
@@ -94,7 +104,7 @@ class Evaluator:
                 prvNode = nd
         if len(spacingsRaw_l) > 0:
             spacingsHist_l = self.processActualHistCurve(spacingsRaw_l)
-            result = self.discreteRegression(gp.eventspacingsdisthistcurvefile,
+            result = self.discreteRegression(self.config.eventspacingsdisthistcurvefile,
                                              spacingsHist_l)
         else:
             result = 1
@@ -109,7 +119,7 @@ class Evaluator:
                 if len(eventsLengthHist_l) == 0:
                     result = 1
                 else:
-                    result = self.discreteRegression(gp.eventlengthdisthistcurvefile, eventsLengthHist_l)
+                    result = self.discreteRegression(self.config.eventlengthdisthistcurvefile, eventsLengthHist_l)
                 self.results.append(dict(Result = "trackEventLengthDistribution_curvefit_T{}".format(t.Track_ID),
                                          ResultFlavour = "GAME BOARD STRUCTURE STATISTIC STATS",
                                          ResultValue = result, Weighting = 8))
@@ -126,8 +136,8 @@ class Evaluator:
                                          ResultValue = b[1], Weighting = 0))
 
             # Game length OMITING FROM EVAL SINCE DEALT W/ IN SETTER
-            if gp.idealgamelength > 0:
-                gamelengthstatit = (self.stats.avglengthinrounds - gp.idealgamelength) / gp.idealgamelength
+            if self.config.idealgamelength > 0:
+                gamelengthstatit = (self.stats.avglengthinrounds - self.config.idealgamelength) / self.config.idealgamelength
             else:
                 gamelengthstatit = 1
 
@@ -154,7 +164,7 @@ class Evaluator:
                     curTrack['prevwasevent'] = False
 
             if len(self.moves) > 0:
-                twohitsstatit = len(twoHits) / len(self.moves) - gp.opttwohitspct
+                twohitsstatit = len(twoHits) / len(self.moves) - self.config.opttwohitspct
             else:
                 twohitsstatit = 1
             self.results.append(dict(Result = "twohits", ResultFlavour = "GAMEPLAY SCALAR STATS",
@@ -189,7 +199,7 @@ class Evaluator:
                 result = 1
             else:
                 eventsOverTime_l = self.processActualTimeCurve(movesPerTrial_df, eventsOverTime_df, "hasevent")
-                result = self.discreteRegression(gp.eventsovertimecurvefile, eventsOverTime_l, smoothing = 0.7)
+                result = self.discreteRegression(self.config.eventsovertimecurvefile, eventsOverTime_l, smoothing = 0.7)
             self.results.append(dict(Result = "eventsOverTime_curvefit", ResultFlavour = "GAMEPLAY STATISTICAL STATS (lol)",
                                      ResultValue = result, Weighting = 20))
 
@@ -200,7 +210,7 @@ class Evaluator:
                 result = 1
             else:
                 eventsOverTime_l = self.processActualTimeCurve(movesPerTrial_df, energyOverTime_df, "eventmag")
-                result = self.discreteRegression(gp.eventenergyfile, eventsOverTime_l, smoothing = 0.6)
+                result = self.discreteRegression(self.config.eventenergyfile, eventsOverTime_l, smoothing = 0.6)
             self.results.append(dict(Result = "energy_curvefit", ResultFlavour = "GAMEPLAY STATISTICAL STATS (lol)",
                                      ResultValue = result, Weighting = 14))
 
@@ -212,7 +222,7 @@ class Evaluator:
             else:
                 velocityOverTime_l = self.processActualTimeCurve(movesPerTrial_df, velocityOverTime_df, "score")
                 # Smooth, since we want to curve match general trends
-                result = self.discreteRegression(gp.velocityovertimecurvefile, velocityOverTime_l, smoothing = 0.6)
+                result = self.discreteRegression(self.config.velocityovertimecurvefile, velocityOverTime_l, smoothing = 0.6)
             self.results.append(dict(Result = "velocity_curvefit", ResultFlavour = "GAMEPLAY STATISTICAL STATS (lol)",
                                      ResultValue = result, Weighting = 4))
 
@@ -221,7 +231,7 @@ class Evaluator:
             if len(eventsLengthHist_l) == 0:
                 result = 1
             else:
-                result = self.discreteRegression(gp.eventlengthdisthistcurvefile, eventsLengthHist_l)
+                result = self.discreteRegression(self.config.eventlengthdisthistcurvefile, eventsLengthHist_l)
             self.results.append(dict(Result = "eventsHitLengthDistribution_curvefit",
                                      ResultFlavour = "GAMEPLAY STATISTICAL STATS (lol)",
                                      ResultValue = result, Weighting = 10))
@@ -242,7 +252,7 @@ class Evaluator:
         merged_df.sort_values(['movePct'])
 
         merged_l = self.eventSetBuilder.discretizeCurve(list(zip(merged_df['movePct'].to_list(), merged_df[y_field].to_list())),
-                                                        gp.effectiveboardlength, accumulate = True)
+                                                        self.config.effectiveboardlength, accumulate = True)
         # Need to re-normalize since accumulated with smoothing applied
         final_l = self.eventSetBuilder.normalizeCurveMagnitude(merged_l)
         return final_l
@@ -346,6 +356,8 @@ class CurveOptimizer:
 
         :return: optimal scaling factor (float)
         """
+        from scipy.optimize import minimize
+
         y_smoothed = np.array([y for x, y in self.smoothed_curve])
         y_actualized_ideal = np.array([y for x, y in self.actualized_ideal_curve])
 

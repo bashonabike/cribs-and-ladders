@@ -1,4 +1,3 @@
-import game_params as gp
 import statistics as st
 import collections as col
 import matplotlib.pyplot as plt
@@ -10,11 +9,46 @@ import sqlite3 as sql
 import datetime as dt
 from io import StringIO
 import os
+from cribsandladders.config import GameConfig, DEFAULT_CONFIG
+
+
+def build_insert_stat_stub(cursor):
+    """
+    Builds the "INSERT INTO Stat (col1,col2,...) VALUES (" prefix by
+    introspecting the live Stat table schema (skipping the
+    auto-incrementing Stat_ID column).
+
+    This used to be `gp.insertstatstub`, a lazily-computed module-level
+    global in game_params.py, built from a second live sqlite
+    connection opened behind the scenes the first time any of
+    gp.sqliteConn/sqliteCursor/insertstatstub was read (see that
+    module's __getattr__). Pulling it into Stats.py as a plain function
+    over an explicit cursor means insertStatsRecord no longer depends
+    on game_params at all, and this piece is unit-testable against a
+    temp sqlite db with a matching Stat table instead of the real one.
+
+    Args:
+        cursor (sqlite3.Cursor): cursor for a connection with a Stat
+            table already defined.
+
+    Returns:
+        str: e.g. "INSERT INTO Stat (Board_ID,Timestamp,...) Values ("
+    """
+    cursor.execute("SELECT name FROM pragma_table_info('Stat') as tblInfo")
+    result = cursor.fetchall()
+    result.remove(('Stat_ID',))
+    sb = StringIO()
+    sb.write("INSERT INTO Stat (")
+    sb.write("".join([c[0] + "," for c in result])[:-1])
+    sb.write(") Values (")
+    stub = sb.getvalue()
+    sb.close()
+    return stub
 
 
 class Stats:
 
-    def __init__(self, board, squad, optimizerRunSet, optimizerRun):
+    def __init__(self, board, squad, optimizerRunSet, optimizerRun, config: GameConfig = DEFAULT_CONFIG):
         """
         Initialize the statistics object.
 
@@ -23,6 +57,8 @@ class Stats:
             squad: The CribSquad object containing the players to evaluate.
             optimizerRunSet: The identifier for the current optimizer run set.
             optimizerRun: The identifier for the current optimizer run.
+            config (GameConfig): game configuration (defaults to the
+                module-level DEFAULT_CONFIG).
 
         Attributes:
             moves (list): A list of moves made in the games.
@@ -55,6 +91,7 @@ class Stats:
         self.squad = squad
         self.optimizerRunSet = optimizerRunSet
         self.optimizerRun = optimizerRun
+        self.config = config
 
         self.moves = []
 
@@ -202,22 +239,22 @@ class Stats:
                              .reset_index())
 
         # Compute game & track-level stats
-        self.soexcitespeggingbytrack = [float(e) / float(gp.numtrials) for e in
+        self.soexcitespeggingbytrack = [float(e) / float(self.config.numtrials) for e in
                                         ((joined_df.query('soexcite == True'))[['track']]
                                          .assign(moves=1).groupby(['track'])
                                          .agg('sum')['moves'].to_list())]
         self.soexcitespegging = sum(self.soexcitespeggingbytrack)
-        self.repeatsbytrack = ([float(r) / float(gp.numtrials) for r in joined_df.query('not end_e.isnull()')
+        self.repeatsbytrack = ([float(r) / float(self.config.numtrials) for r in joined_df.query('not end_e.isnull()')
         [['trialmux', 'track', 'eventhit']].assign(hits=1).groupby(['trialmux', 'track', 'eventhit']).agg('sum')
         .query('hits > 1').assign(repeats=1).groupby(['track']).agg('sum')['repeats'].to_list()])
         self.repeats = sum(self.repeatsbytrack)
 
         self.avglengthinrounds = (float(sum(joined_df[['trialmux', 'round']].groupby(['trialmux']).agg('max')['round']
-                                            .to_list())) / float(gp.numtrials))
+                                            .to_list())) / float(self.config.numtrials))
 
-        self.chutesbytrack = ([float(c) / float(gp.numtrials) for c in joined_df[['track', 'end_c']]
+        self.chutesbytrack = ([float(c) / float(self.config.numtrials) for c in joined_df[['track', 'end_c']]
         .dropna().assign(chutes=1).groupby(['track']).agg('sum').sort_values(['track'])['chutes'].to_list()])
-        self.laddersbytrack = ([float(l) / float(gp.numtrials) for l in joined_df[['track', 'end_l']]
+        self.laddersbytrack = ([float(l) / float(self.config.numtrials) for l in joined_df[['track', 'end_l']]
         .dropna().assign(ladders=1).groupby(['track']).agg('sum').sort_values(['track'])['ladders'].to_list()])
         self.eventsbytrack = [l + c for (l, c) in zip(self.laddersbytrack, self.chutesbytrack)]
         self.ladders = sum(self.laddersbytrack)
@@ -251,16 +288,16 @@ class Stats:
         laddersin2_df.sort_values(['track', 'trialmux'])
         chutesin2_df.sort_values(['track', 'trialmux'])
 
-        self.laddersin1bytrack = ([float(i) / float(gp.numtrials) for i in
+        self.laddersin1bytrack = ([float(i) / float(self.config.numtrials) for i in
                                    (laddersin1_df.groupby(['track', 'trialmux']).size().reset_index(name='counts').
                                     groupby('track').agg('sum')['counts'].to_list())])
-        self.laddersin2bytrack = ([float(i) / float(gp.numtrials) for i in
+        self.laddersin2bytrack = ([float(i) / float(self.config.numtrials) for i in
                                    (laddersin2_df.groupby(['track', 'trialmux']).size().reset_index(name='counts').
                                     groupby('track').agg('sum')['counts'].to_list())])
-        self.chutesin1bytrack = ([float(i) / float(gp.numtrials) for i in
+        self.chutesin1bytrack = ([float(i) / float(self.config.numtrials) for i in
                                   (chutesin1_df.groupby(['track', 'trialmux']).size().reset_index(name='counts').
                                    groupby('track').agg('sum')['counts'].to_list())])
-        self.chutesin2bytrack = ([float(i) / float(gp.numtrials) for i in
+        self.chutesin2bytrack = ([float(i) / float(self.config.numtrials) for i in
                                   (chutesin2_df.groupby(['track', 'trialmux']).size().reset_index(name='counts').
                                    groupby('track').agg('sum')['counts'].to_list())])
         self.eventsin1bytrack = [l + c for l, c in zip(self.laddersin1bytrack, self.chutesin1bytrack)]
@@ -310,25 +347,25 @@ class Stats:
         Returns:
             None
         """
-        sqliteConn = sql.connect('Boards/AllBoards.db')
+        sqliteConn = sql.connect(self.config.db_path)
         sqliteCursor = sqliteConn.cursor()
 
         # Prepend columns to write to, all except auto-incrementing Stat_ID
         insertstatquery_sb = StringIO()
-        insertstatquery_sb.write(gp.insertstatstub)
+        insertstatquery_sb.write(build_insert_stat_stub(sqliteCursor))
 
         # board level setup stats
         tracksList_sb = StringIO()
-        if gp.tracksused is None:
+        if self.config.tracksused is None:
             for p in self.squad.players:
                 tracksList_sb.write(str(p.tracknum))
                 tracksList_sb.write(",")
-        elif gp.tracksused is list:
-            for t in gp.tracksused:
+        elif self.config.tracksused is list:
+            for t in self.config.tracksused:
                 tracksList_sb.write(t)
                 tracksList_sb.write(",")
         else:
-            raise Exception("Invalid tracksused setting in game_params: {}".format(gp.tracksused))
+            raise Exception("Invalid tracksused setting in game_params: {}".format(self.config.tracksused))
         pos = tracksList_sb.tell()
         tracksList_sb.seek(0, os.SEEK_END)
         if tracksList_sb.tell() == 0:
@@ -338,7 +375,8 @@ class Stats:
         tracksList_sb.close()
         # NOTE: this is less efficient than including values directly using '?'s but this insert only fires infrequently
         insertstatquery_sb.write("{},\'{}\',{},{},{},\'{}\',\'{}\',{},".format(self.board.boardID, dt.datetime.now(),
-                                                                               gp.numtrials, gp.numplayers, gp.numdecks,
+                                                                               self.config.numtrials, self.config.numplayers,
+                                                                               self.config.numdecks,
                                                                                tracksList,
                                                                                self.board.boardName,
                                                                                self.avglengthinrounds))
@@ -346,8 +384,8 @@ class Stats:
         # balance stats
         # NOTE: we cannot use player.wins with the multprocessing!
         winsByPlayer = col.Counter([m.player for m in self.moves if m.winningMove])
-        self.partialBalanceSet = [(float(winsByPlayer[p.num]) - (float(gp.numtrials) / float(gp.numplayers))) /
-                                  float(gp.numtrials) for p in self.squad.players]
+        self.partialBalanceSet = [(float(winsByPlayer[p.num]) - (float(self.config.numtrials) / float(self.config.numplayers))) /
+                                  float(self.config.numtrials) for p in self.squad.players]
         insertstatquery_sb.write(self.buildSet4PlusInsertSnippet(self.partialBalanceSet))
         self.partialBalanceSet = [s for s in zip([p.tracknum for p in self.squad.players], self.partialBalanceSet)]
 
@@ -375,7 +413,7 @@ class Stats:
         sqliteConn.commit()
         # TODO: insert file links to heatmaps once generated
 
-    def print_metrics(self):
+    def print_metrics(self, output_dir="./Board_Results"):
         # TODO: also commit this to data table in sql
         """
         Print game metrics to a text file.
@@ -388,13 +426,27 @@ class Stats:
         the current date and time.
 
         Args:
-            None
+            output_dir (str): directory the results file is written
+                into. Defaults to "./Board_Results" (previous hardcoded
+                behavior). Parameterized so tests can point this at a
+                temp directory.
 
         Returns:
             None
+
+        TODO(liam): this method reads self.soexcites_pegs and
+        self.lengths_in_rounds, neither of which this class ever sets
+        (the actual attributes are self.soexcitespeggingbytrack /
+        self.soexcitespegging and self.avglengthinrounds) -- calling
+        print_metrics as written raises AttributeError immediately.
+        Looks pre-existing and unrelated to the Phase 4 config-injection
+        work; needs investigation into what this was meant to read
+        before it's called anywhere for real.
         """
-        with open(("./Board_Results/" + self.board.boardName + "-" + str(gp.numplayers) + "-" + str(gp.numdecks) + "-" +
-                   str(gp.numtrials) + "-" + datetime.datetime.now().strftime("%y%m%d%H%M%S") + ".txt"),
+        os.makedirs(output_dir, exist_ok=True)
+        with open((output_dir + "/" + self.board.boardName + "-" + str(self.config.numplayers) + "-" +
+                   str(self.config.numdecks) + "-" +
+                   str(self.config.numtrials) + "-" + datetime.datetime.now().strftime("%y%m%d%H%M%S") + ".txt"),
                   "w") as results:
             results.write("\t" + self.board.boardName + "\n")
             results.write("Lengths\t")
@@ -404,14 +456,14 @@ class Stats:
                 strTemp += "{}/".format(self.board.getTrackByNum(player.tracknum).efflength)
             results.write(strTemp[:-1] + "\n")
 
-            results.write("# trials\t" + str(gp.numtrials) + "\n")
-            results.write("# decks\t" + str(gp.numdecks) + "\n")
-            results.write("# players\t" + str(gp.numplayers) + "\n")
+            results.write("# trials\t" + str(self.config.numtrials) + "\n")
+            results.write("# decks\t" + str(self.config.numdecks) + "\n")
+            results.write("# players\t" + str(self.config.numplayers) + "\n")
 
             results.write("balance (<5% reasonable for traditional board, for comparison) \t")
             strTemp = ""
             for player in self.squad.players:
-                winDif = (float(player.wins) - (float(gp.numtrials) / float(gp.numplayers))) / float(gp.numtrials)
+                winDif = (float(player.wins) - (float(self.config.numtrials) / float(self.config.numplayers))) / float(self.config.numtrials)
                 strTemp += "{:.2%} (Player {}), ".format(winDif, player.num)
             results.write(strTemp[:-2] + "\n")
 
@@ -439,7 +491,7 @@ class Stats:
             # for bin, mag in event_norm_mags_sorted:
             #     results.write("{}\t{}\n".format(bin,mag))
 
-    def print_temp_maps(self):
+    def print_temp_maps(self, output_dir="./Board_Results/images"):
         """
         Print a heat map of the game, with the x-axis being Game_Duration and
         the y-axis being Event_Magnitude. The heat map shows the likelihood of
@@ -451,23 +503,36 @@ class Stats:
         date and time.
 
         Args:
-            None
+            output_dir (str): directory PNG heat maps are written into.
+                Defaults to "./Board_Results/images" (previous hardcoded
+                behavior). Parameterized so tests can point this at a
+                temp directory.
 
         Returns:
             None
+
+        TODO(liam): `self.hist_by_track_df.groupby('track').to_list('track')`
+        below calls .to_list() on a DataFrameGroupBy, which doesn't have
+        that method -- this raises AttributeError any time hist_by_track_df
+        is non-empty. Looks pre-existing and unrelated to the Phase 4
+        config-injection work; needs investigation into what grouping/
+        listing was actually intended (probably
+        `list(self.hist_by_track_df['track'].unique())`) before this is
+        exercised for real.
         """
         if self.hist_df is None or self.hist_df.empty:
             return
 
+        os.makedirs(output_dir, exist_ok=True)
         for tracknum in set(self.hist_by_track_df.groupby('track').to_list('track').append(0)):
             cur_df = (self.hist_by_track_df.loc[self.hist_by_track_df['track'] == tracknum]
                       [['normmove', 'ladderorchuteamt']] if tracknum > 0
                       else self.hist_df)
             cur_df.rename(columns={'normmove': 'Game_Duration', 'ladderorchuteamt': 'Event_Magnitude'}, inplace=True)
             title = 'Played Heat: Track {}'.format(tracknum) if tracknum > 0 else 'Played Heat: Overall'
-            filename = ("./Board_Results/images/{}-{}-{}-{}-{}-{}.png".
-                        format(self.board.boardName, str(gp.numplayers), str(gp.numdecks),
-                               str(gp.numtrials), "Overall" if tracknum > 0 else "Track {}".format(tracknum),
+            filename = (output_dir + "/{}-{}-{}-{}-{}-{}.png".
+                        format(self.board.boardName, str(self.config.numplayers), str(self.config.numdecks),
+                               str(self.config.numtrials), "Overall" if tracknum > 0 else "Track {}".format(tracknum),
                                datetime.datetime.now().strftime("%y%m%d%H%M%S")))
 
             fig, ax1 = plt.subplots(ncols=1, figsize=(30, 15), sharex=True, sharey=True)

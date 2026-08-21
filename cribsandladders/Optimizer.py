@@ -2,23 +2,30 @@ import pandas as pd
 import numpy as np
 import sqlite3 as sql
 from io import StringIO
-import lightgbm as lgb
-from sklearn.multioutput import MultiOutputRegressor
-from sklearn.model_selection import train_test_split
 import random as rd
-from sklearn.metrics import mean_squared_error
+from cribsandladders.config import GameConfig, DEFAULT_CONFIG
 
-import game_params as gp
+# NOTE: lightgbm and the sklearn imports used to live at module scope,
+# which meant importing Optimizer.py at all -- even to test the plain
+# pandas/numpy logic in runIncrIteration, detWeighedScoring, etc. --
+# required both packages installed. They're imported lazily inside
+# runGBM/testGBMOnPairings instead (the only two methods that use
+# them), mirroring the Phase 2 fix to Player.py's scoretree import and
+# the Phase 4 fixes to EventSetBuilder.py's markovgame import and
+# Evaluator.py's scipy.optimize import.
 
 
 class Optimizer:
-    def __init__(self, board, optimizerRunSet):
+    def __init__(self, board, optimizerRunSet, config: GameConfig = DEFAULT_CONFIG):
         """
         Initialize the Optimizer object.
 
         Args:
             board (Board): The board to optimize.
             optimizerRunSet (int): The identifier for the optimizer run set.
+            config (GameConfig): game configuration (defaults to the
+                module-level DEFAULT_CONFIG). Determines the Optimizer db
+                path and the GBM training/param-search bounds.
 
         Attributes:
             prevParams (list): A list of previous parameters.
@@ -46,7 +53,8 @@ class Optimizer:
         self.bestPostFminParams = []
         self.board = board
         self.optimizerRunSet = optimizerRunSet
-        self.sqlConn = sql.connect('etc/Optimizer.db')
+        self.config = config
+        self.sqlConn = sql.connect(config.optimizer_db_path)
         self.sqliteCursor = self.sqlConn.cursor()
         self.trainFullSet_df = None
         self.paramsTrainSet_df = None
@@ -179,13 +187,18 @@ class Optimizer:
             - Retrieves absolute bounds for the current board from the database.
             - Runs a GMB model to predict the optimal parameters to Cribs model given a set of results.
         """
+        import lightgbm as lgb
+        from sklearn.multioutput import MultiOutputRegressor
+        from sklearn.model_selection import train_test_split
+        from sklearn.metrics import mean_squared_error
+
         X = self.resultsTrainSet_df.drop(['OptimizerRunSet', 'OptimizerRun', 'Board_ID'], axis=1)
         # X = self.resultsTrainSet_df.drop(['OptimizerRunSet', 'OptimizerRun' ,'Board_ID', 'eventsHitLengthDistribution_curvefit', 'eventSpacingHist_curvefit'], axis=1)
         y = self.paramsTrainSet_df.drop(['OptimizerRunSet', 'OptimizerRun', 'Board_ID'], axis=1)
-        testtotraindataratio = self.setParamFromBounds(gp.testtotraindataratio_bnds)
-        trainrandomstate = self.setParamFromBounds(gp.trainrandomstate_bnds)
-        trainlearningrate = self.setParamFromBounds(gp.trainlearningrate_bnds)
-        trainnumestimators = self.setParamFromBounds(gp.trainnumestimators_bnds)
+        testtotraindataratio = self.setParamFromBounds(self.config.testtotraindataratio_bnds)
+        trainrandomstate = self.setParamFromBounds(self.config.trainrandomstate_bnds)
+        trainlearningrate = self.setParamFromBounds(self.config.trainlearningrate_bnds)
+        trainnumestimators = self.setParamFromBounds(self.config.trainnumestimators_bnds)
 
         X_train, X_test, y_train, y_test = train_test_split(X, y,
                                                             test_size=testtotraindataratio,
@@ -236,6 +249,11 @@ class Optimizer:
             - Retrieves absolute bounds for the current board from the database.
             - Runs a GMB model to predict the optimal parameters to Cribs model given a set of results.
         """
+        import lightgbm as lgb
+        from sklearn.multioutput import MultiOutputRegressor
+        from sklearn.model_selection import train_test_split
+        from sklearn.metrics import mean_squared_error
+
         resultsPreChanges = self.resultsTrainSet_df[self.resultsTrainSet_df['OptimizerRun'] < 1725]
         paramsPreChanges = self.paramsTrainSet_df[self.paramsTrainSet_df['OptimizerRun'] < 1725]
         X = resultsPreChanges[optPairings]
@@ -345,7 +363,7 @@ class Optimizer:
                     #     newVal = targetParam_sr['value']*(1.0 - reverse*inverse*reverseTrackwise*gp.changepctperiteration)
                     # else:
                     #     newVal = targetParam_sr['value']*(1.0 - reverse*inverse*reverseTrackwise*gp.changepctperiteration)
-                    changeAmt = ((absbounds_sr['UBound'] - absbounds_sr['LBound']) * gp.changebaseincrperiter
+                    changeAmt = ((absbounds_sr['UBound'] - absbounds_sr['LBound']) * self.config.changebaseincrperiter
                                  * result_sr['WeighedResult'])
                     newVal = targetParam_sr['value'] - (reverse * inverse * reverseTrackwise * changeAmt)
 

@@ -374,5 +374,20 @@ class GameConfig:
     def db_path(self) -> str:
         return str(self.data_root / "Boards" / "AllBoards.db")
 
+    # ---- Phase 4 (Optimizer/board-design subsystem) db paths, added
+    # alongside the game_params -> GameConfig migration of
+    # PossibleEvents/Stats/EventSetBuilder/Optimizer. Previously each of
+    # these was a separate hardcoded literal ('etc/Temp.db',
+    # 'etc/Optimizer.db') repeated at every call site instead of a single
+    # source of truth, same issue db_path fixed for 'Boards/AllBoards.db'
+    # in Phase 3. ----
+    @property
+    def temp_events_db_path(self) -> str:
+        return str(self.data_root / "etc" / "Temp.db")
+
+    @property
+    def optimizer_db_path(self) -> str:
+        return str(self.data_root / "etc" / "Optimizer.db")
+
 
 DEFAULT_CONFIG = GameConfig()

@@ -38,3 +38,37 @@ pytest-cov>=4.0
 #     The one buildDXFFile integration test uses pytest.importorskip
 #     ("ezdxf") and is skipped (not failed) if ezdxf isn't installed.
 # --------------------------------------------------------------------------
+
+# --------------------------------------------------------------------------
+# Phase 4 (Optimizer/board-design subsystem) test notes:
+#   - test_possible_events.py: needs pandas + numpy only. No longer needs
+#     matplotlib/scipy at import time.
+#   - test_stats.py: needs pandas + numpy; the insertStatsRecord test uses
+#     a real (temp) sqlite db, stdlib sqlite3 only.
+#   - test_evaluator.py: needs pandas + numpy for everything except one
+#     test. `from scipy.optimize import minimize` was moved from module
+#     scope into CurveOptimizer.find_optimal_scale (the only method that
+#     uses it), so importing the module and running every other test
+#     needs no scipy. The one test that does
+#     (test_curve_optimizer_find_optimal_scale_matches_analytical_with_scipy)
+#     is marked @pytest.mark.integration and uses
+#     pytest.importorskip("scipy"), so it's skipped rather than failed
+#     when scipy isn't installed.
+#   - test_optimizer.py: needs pandas + numpy only for all unit tests.
+#     `import lightgbm` and the three `sklearn` submodule imports were
+#     moved from module scope into runGBM/testGBMOnPairings (the only
+#     methods that use them), so lightgbm/sklearn are not required to
+#     import Optimizer.py or run anything here. One
+#     @pytest.mark.integration test uses a real (temp) sqlite db, stdlib
+#     sqlite3 only.
+#   - test_eventsetbuilder.py: needs pandas + numpy (via
+#     cribsandladders.Board). `import markovgame as mg` was moved from
+#     module scope into the one branch of runPartialTrackEffLengthHoles
+#     that uses it, so the compiled markovgame extension is not required
+#     to import EventSetBuilder.py or run anything in this file. Does NOT
+#     need a real sqlite db -- retrieveOrGenerateBenchmarkMoves is mocked
+#     out in setUp, and TestParamSet builds its own temp db.
+#   Net effect: none of the five Phase 4 test files require scipy,
+#   lightgbm, scikit-learn, markovgame, or matplotlib to run their
+#   non-integration tests -- only pandas/numpy/stdlib.
+# --------------------------------------------------------------------------

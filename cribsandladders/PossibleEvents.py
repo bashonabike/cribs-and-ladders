@@ -32,7 +32,6 @@ import matplotlib.path as mpath
 import numpy as np
 import matplotlib.pyplot as plt
 import math
-import game_params as gp
 import copy as cp
 import sqlite3 as sql
 import pandas as pd
@@ -40,16 +39,21 @@ from datetime import datetime as dt
 import os
 import bisect as bsc
 from io import StringIO
+from cribsandladders.config import GameConfig, DEFAULT_CONFIG
 
 
 class PossibleEvents:
 
-    def __init__(self, board):
+    def __init__(self, board, config: GameConfig = DEFAULT_CONFIG):
         """
         Initialize the PossibleEvents object.
 
         Args:
             board (board): The board object to find possible events on.
+            config (GameConfig): game configuration (defaults to the
+                module-level DEFAULT_CONFIG). Determines candidate-event
+                search parameters (eventminspacing, maxeventlineext, ...)
+                and the temp-cache/board db paths.
 
         Attributes:
             allTracksCandidateSet (list): A list of candidate events across all tracks.
@@ -61,7 +65,8 @@ class PossibleEvents:
         self.allTracksCandidateSet, self.byTrackCandidateSets = None, []
         self.multiTrackCandidateSet = None
         self.board = board
-        sqlConn = sql.connect('etc/Temp.db')
+        self.config = config
+        sqlConn = sql.connect(config.temp_events_db_path)
         if not self.tryRetrieveCache(sqlConn):
             self.buildSet(board, sqlConn)
 
@@ -95,7 +100,7 @@ class PossibleEvents:
 
         # Verify files have not been updated since last cache
         tempTableUpdated = dt.strptime(candidateEvents_df.iloc[0]['Timestamp'], '%m/%d/%y %H:%M:%S')
-        sqlConnBoard = sql.connect('Boards/AllBoards.db')
+        sqlConnBoard = sql.connect(self.config.db_path)
         boardQuery = ("SELECT  b.Track1BoardPath, b.Track2BoardPath, b.Track3BoardPath, b.TwoDeckLineBoardPath " +
                       "FROM Board b WHERE b.Board_ID = ?")
         boardFiles = sqlConnBoard.execute(boardQuery, [self.board.boardID]).fetchall()
@@ -108,7 +113,27 @@ class PossibleEvents:
                 sqlConn.commit()
                 return False
 
-        # If passed gauntlet, then Great Job!  Parse cached data into candidate events
+        # If passed gauntlet, then Great Job! Parse cached data into candidate events.
+        self.hydrate_candidate_events_from_dataframe(candidateEvents_df)
+        return True
+
+    def hydrate_candidate_events_from_dataframe(self, candidateEvents_df):
+        """
+        Builds CandidateEvents/CandidateEvent domain objects (and sets
+        up their linked-event cross-references) purely from an
+        already-fetched DataFrame of cached rows -- no sqlite, no
+        filesystem. Split out of tryRetrieveCache so this parsing logic
+        is unit-testable with a small hand-built DataFrame plus a fake
+        board/track, instead of requiring a real temp-cache db.
+
+        Mutates self.board's tracks in place (sets each track's
+        `candidateEvents`), same as the inline code this replaced.
+
+        Args:
+            candidateEvents_df (pd.DataFrame): rows from
+                TempCandidateEvents, ordered by (Board_ID, Track_ID,
+                CandidateEvent_ID) -- see the query in tryRetrieveCache.
+        """
         curTrackNum = -1
         curTrack = None
         currCandSetList = []
@@ -127,7 +152,8 @@ class PossibleEvents:
                                       orthoFwdMinIncr=event_sr['orthoFwdMinIncr'],
                                       orthoRevMinIncr=event_sr['orthoRevMinIncr'],
                                       orthoFwdMaxIncr=event_sr['orthoFwdMaxIncr'],
-                                      orthoRevMaxIncr=event_sr['orthoRevMaxIncr'])
+                                      orthoRevMaxIncr=event_sr['orthoRevMaxIncr'],
+                                      config=self.config)
             curEvent.db_hash = event_sr["CandidateEvent_ID"]
             curEvent.eventID = event_sr["CandidateEvent_ID"]
             curEvent.linkFinderHash = event_sr['FinderHash']
@@ -162,8 +188,6 @@ class PossibleEvents:
                         if idx < len(linkListFinder) and linkListFinder[idx] == l:
                             links.append(linkList[idx]['mainevent'])
                 if len(links) > 0: m['mainevent'].setLinkedEvents(links)
-
-        return True
 
     def buildSet(self, board, sqlConn):
         """
@@ -239,7 +263,7 @@ class PossibleEvents:
                                 multiPos = False
 
                         if routePos:
-                            t.addCandidateEvent(CandidateEvent(t.trackNum, h_a, h_b, False))
+                            t.addCandidateEvent(CandidateEvent(t.trackNum, h_a, h_b, False, config=self.config))
                         elif multiPos and not t.trackNum in tracksHit:
                             # Check to see if multi-track event possible
                             # if contains only couples, we are good!
@@ -270,9 +294,9 @@ class PossibleEvents:
                             if len(tracksHit) == 0: eligibleForExtension = False
 
                             if eligibleForExtension:
-                                extensions = self.extend_line(h_a.coords, h_b.coords, gp.maxeventlineext)
+                                extensions = self.extend_line(h_a.coords, h_b.coords, self.config.maxeventlineext)
                                 rects = self.create_extended_rectangles(h_a.coords, h_b.coords,
-                                                                        gp.maxeventlineext)
+                                                                        self.config.maxeventlineext)
                                 holesHitList_l = []
                                 # tracksSubset = [sub_t_c_set for sub_t_c_set in self.byTrackCandidateSets
                                 #                 if sub_t_c_set.trackNum not in tracksClosed]
@@ -345,25 +369,25 @@ class PossibleEvents:
                     elif self.checkAngleForOrtho(self.eventAngleWithInstantSlope(h_b.coords, holes[h_b_idx - 1].coords,
                                                                                  h_a.coords)):
                         # Determine if can otherwise route indirectly along orthogonal space either side of track path
-                        curEvent = CandidateEvent(t.trackNum, h_a, h_b, True)
+                        curEvent = CandidateEvent(t.trackNum, h_a, h_b, True, config=self.config)
                         for rev in (False, True):
                             orthoVectsSearchAreas = list(self.smallest_enclosing_rectangle(h_a.coords, h_b.coords,
-                                                                                           gp.maxloopyorthoeventdisplacementincrements
-                                                                                           * gp.eventminspacing, rev))
-                            maxIncr = gp.maxloopyorthoeventdisplacementincrements
+                                                                                           self.config.maxloopyorthoeventdisplacementincrements
+                                                                                           * self.config.eventminspacing, rev))
+                            maxIncr = self.config.maxloopyorthoeventdisplacementincrements
                             minIncr = 0
                             ortho = self.orthogonal_vector(h_a.coords, h_b.coords,
-                                                           gp.maxloopyorthoeventdisplacementincrements
-                                                           * gp.eventminspacing, rev)
+                                                           self.config.maxloopyorthoeventdisplacementincrements
+                                                           * self.config.eventminspacing, rev)
                             for t_interc in self.byTrackCandidateSets:
                                 intercPoints = self.points_in_rectangle(t_interc.holeCoords_l, orthoVectsSearchAreas)
                                 intercVects = self.build_interception_test_vector_set(t_interc.holeCoords_l,
                                                                                       intercPoints)
                                 floorIncr, testIncr, = self.test_sidestep_events(h_a, h_b, t_interc.holes,
                                                                                  t_interc.holeCoords_l, ortho,
-                                                                                 gp.maxloopyorthoeventdisplacementincrements
-                                                                                 * gp.eventminspacing,
-                                                                                 gp.eventminspacing, intercVects, rev)
+                                                                                 self.config.maxloopyorthoeventdisplacementincrements
+                                                                                 * self.config.eventminspacing,
+                                                                                 self.config.eventminspacing, intercVects, rev)
                                 if testIncr < maxIncr: maxIncr = testIncr
                                 if floorIncr > minIncr: minIncr = floorIncr
                                 if maxIncr == 0: break
@@ -489,7 +513,7 @@ class PossibleEvents:
         for hole_vector in hole_vectors:
             sharedWithTracks = [v[0].tracknum for v in hole_vectors if v[0].tracknum != hole_vector[0].tracknum]
             currMultiCand = CandidateEvent(hole_vector[0].tracknum, hole_vector[0], hole_vector[1],
-                                           isOrtho=False, sharedWithTracks=sharedWithTracks)
+                                           isOrtho=False, sharedWithTracks=sharedWithTracks, config=self.config)
             currTrack = board.getTrackByNum(hole_vector[0].tracknum)
             currTrack.candidateEvents.addCandidateEvent(currMultiCand)
             linkedEventsSet.append(currMultiCand)
@@ -933,11 +957,11 @@ class PossibleEvents:
             List of tuples: Coordinates of the bottom-left and top-right corners of the rectangle.
         """
         mid = self.midpoint(point1, point2)
-        orthogonal_dx, orthogonal_dy = self.orthogonal_vector(point1, point2, length + gp.eventminspacing, reverse)
+        orthogonal_dx, orthogonal_dy = self.orthogonal_vector(point1, point2, length + self.config.eventminspacing, reverse)
         ortho_dxdy = (orthogonal_dx, orthogonal_dy)
 
         # Extend out p1 & p2 to widen search box
-        (ext1, ext2) = self.extend_line(point1, point2, gp.eventminspacing / 2)
+        (ext1, ext2) = self.extend_line(point1, point2, self.config.eventminspacing / 2)
         extp1, extp2 = ext1[1], ext2[1]
         ortho_vec1 = (extp1, [p + o for p, o in zip(extp1, ortho_dxdy)])
         ortho_vec2 = (extp2, [p + o for p, o in zip(extp2, ortho_dxdy)])
@@ -1062,7 +1086,7 @@ class PossibleEvents:
         Returns:
             tuple: A tuple containing four tuples, each representing a corner of the bounding box.
         """
-        ortho_dxdy = self.orthogonal_vector(vector[0], vector[1], gp.eventminspacing / 2.0, False)
+        ortho_dxdy = self.orthogonal_vector(vector[0], vector[1], self.config.eventminspacing / 2.0, False)
         revOrtho_dxdy = [(-1) * d for d in ortho_dxdy]
         midpoint = tuple(sum(c) / 2 for c in zip(vector[0], vector[1]))
         corners = [vector[0], tuple(sum(c) for c in zip(midpoint, ortho_dxdy))]
@@ -1201,10 +1225,10 @@ class PossibleEvents:
             bool: True if the angle is suitable, False otherwise.
         """
         angle_deg_controlled = (360 + angle_deg) % 360
-        if (angle_deg_controlled >= gp.minanglefromtracktangent and
-                angle_deg_controlled <= (180 - gp.minanglefromtracktangent)): return False
-        if (angle_deg_controlled >= 180 + gp.minanglefromtracktangent and
-                angle_deg_controlled <= (360 - gp.minanglefromtracktangent)): return False
+        if (angle_deg_controlled >= self.config.minanglefromtracktangent and
+                angle_deg_controlled <= (180 - self.config.minanglefromtracktangent)): return False
+        if (angle_deg_controlled >= 180 + self.config.minanglefromtracktangent and
+                angle_deg_controlled <= (360 - self.config.minanglefromtracktangent)): return False
         return True
 
 
@@ -1229,7 +1253,7 @@ class CandidateEvent:
     def __init__(self, trackNum, startHole, endHole, isOrtho,
                  orthoFwdMinIncr=0, orthoRevMinIncr=0, orthoFwdMaxIncr=0, orthoRevMaxIncr=0,
                  orthoVector=(-1, -1),
-                 sharedWithTracks=None, linkedEvents=None):
+                 sharedWithTracks=None, linkedEvents=None, config: GameConfig = DEFAULT_CONFIG):
         """
         Initialize a CandidateEvent object.
 
@@ -1245,6 +1269,9 @@ class CandidateEvent:
             orthoVector (tuple): The vector of the orthogonal event.
             sharedWithTracks (list of int): List of track numbers that this event is shared with.
             linkedEvents (list of CandidateEvent): List of events that are linked to this event.
+            config (GameConfig): game configuration (defaults to the
+                module-level DEFAULT_CONFIG). Only config.maxladderlength
+                is read, to decide canBeLadder.
 
         Returns:
             None
@@ -1259,7 +1286,7 @@ class CandidateEvent:
         self.crowVector = (startHole.coords, endHole.coords)
         self.crowLength = self.calculate_distance(*self.crowVector)
         self.length = self.endHole.num - self.startHole.num
-        self.canBeLadder = self.length <= gp.maxladderlength
+        self.canBeLadder = self.length <= config.maxladderlength
         self.isOrtho = isOrtho
         self.orthoVector = orthoVector
         self.orthoFwdMinIncr = orthoFwdMinIncr

@@ -12,7 +12,6 @@
 import math
 import random as rd
 
-import game_params as gp
 import cribsandladders.BaseLayout as bse
 import cribsandladders.Board as bd
 import matplotlib.pyplot as plt
@@ -26,7 +25,18 @@ from datetime import datetime as dt
 from io import StringIO
 import contextlib
 from collections import defaultdict
-import markovgame as mg
+from cribsandladders.config import GameConfig, DEFAULT_CONFIG
+
+# NOTE: markovgame (a compiled pybind11 extension, Tier 4 per the TDD
+# refactor assessment -- outside Python unit-test reach) is imported
+# lazily inside runPartialTrackEffLengthHoles, the only method that
+# uses it, instead of at module scope. That's what makes `import
+# cribsandladders.EventSetBuilder` -- and constructing an
+# EventSetBuilder against a mocked board/possibleEvents, as
+# test_eventsetbuilder.py already does -- possible without the
+# extension built. Mirrors the Phase 2 fix to Player.py's scoretree
+# import and the other Phase 4 import-hygiene fixes in this pass
+# (Evaluator's scipy.optimize, Optimizer's lightgbm/sklearn).
 
 import time
 
@@ -64,16 +74,19 @@ class EventSetBuilder:
         avgScore: Calculated average score.
     """
 
-    def __init__(self, board, possibleEvents):
+    def __init__(self, board, possibleEvents, config: GameConfig = DEFAULT_CONFIG):
         """
         Initialize the EventSetBuilder with a game board and possible events.
 
         Args:
             board: The game board object containing tracks and holes.
             possibleEvents: Object containing possible events that can be placed on the board.
+            config (GameConfig): game configuration (defaults to the
+                module-level DEFAULT_CONFIG).
         """
         self.board = board
         self.possibleEvents = possibleEvents
+        self.config = config
         self.allTentLengthHisto = []
         self.paramSet = ParamSet(self.board, self.board.tracks)
         self.orthos = 0
@@ -81,12 +94,12 @@ class EventSetBuilder:
         self.events = 0
         self.cancels = 0
         self.eventNodesByTrack = []
-        self.posHands = [item["move"] for item in gp.probHandHist]
-        self.posHandProbs = [item["prob"] for item in gp.probHandHist]
-        self.posPegs = [item["move"] for item in gp.probPegHist]
-        self.posPegProbs = [item["prob"] for item in gp.probPegHist]
-        self.pegRounds = [item["rounds"] for item in gp.probPegRounds]
-        self.pegRoundProbs = [item["prob"] for item in gp.probPegRounds]
+        self.posHands = [item["move"] for item in self.config.probHandHist]
+        self.posHandProbs = [item["prob"] for item in self.config.probHandHist]
+        self.posPegs = [item["move"] for item in self.config.probPegHist]
+        self.posPegProbs = [item["prob"] for item in self.config.probPegHist]
+        self.pegRounds = [item["rounds"] for item in self.config.probPegRounds]
+        self.pegRoundProbs = [item["prob"] for item in self.config.probPegRounds]
         self.prevEffLengths_starter = [dict(track_id=t.Track_ID, efflength=len(t.trackholes))
                                        for t in self.board.tracks]
         self.avgScoreSum, self.avgScoreDiv, self.avgScore = 0, 0, 0
@@ -132,9 +145,9 @@ class EventSetBuilder:
         prevEffLengths = cp.deepcopy(self.prevEffLengths_starter)
         while not self.tryEventSet(self.paramSet, prevEffLengths):
             builditer += 1
-            if builditer > gp.maxitertrynewbuild:
+            if builditer > self.config.maxitertrynewbuild:
                 raise Exception(
-                    "Passed max # iters ({}) to find an event set.  ".format(gp.maxitertrynewbuild) +
+                    "Passed max # iters ({}) to find an event set.  ".format(self.config.maxitertrynewbuild) +
                     "This board may not be feasible.  Try adding more folds in the tracks")
         self.buildSetIntoEvents()
         # TEMPPP!
@@ -158,9 +171,9 @@ class EventSetBuilder:
         prevEffLengths = cp.deepcopy(self.prevEffLengths_starter)
         while not self.tryEventSet(self.paramSet, prevEffLengths):
             builditer += 1
-            if builditer > gp.maxitertrynewbuild:
+            if builditer > self.config.maxitertrynewbuild:
                 raise Exception(
-                    "Passed max # iters ({}) to find an event set.  ".format(gp.maxitertrynewbuild) +
+                    "Passed max # iters ({}) to find an event set.  ".format(self.config.maxitertrynewbuild) +
                     "This board may not be feasible.  Try adding more folds in the tracks")
         self.buildSetIntoEvents()
         # self.plot_coordinates_and_vectors()
@@ -186,9 +199,9 @@ class EventSetBuilder:
             # self.buildSetIntoEvents()
             # self.plot_coordinates_and_vectors()
             builditer += 1
-            if builditer > gp.maxitertrynewbuild:
+            if builditer > self.config.maxitertrynewbuild:
                 raise Exception(
-                    "Passed max # iters ({}) to find an event set.  ".format(gp.maxitertrynewbuild) +
+                    "Passed max # iters ({}) to find an event set.  ".format(self.config.maxitertrynewbuild) +
                     "This board may not be feasible.  Try adding more folds in the tracks")
         self.buildSetIntoEvents()
         # self.plot_coordinates_and_vectors()
@@ -221,9 +234,9 @@ class EventSetBuilder:
         prevEffLengths = cp.deepcopy(self.prevEffLengths_starter)
         while not self.tryEventSet(self.paramSet, prevEffLengths):
             builditer += 1
-            if builditer > gp.maxitertrynewbuild:
+            if builditer > self.config.maxitertrynewbuild:
                 raise Exception(
-                    "Passed max # iters ({}) to find an event set.  ".format(gp.maxitertrynewbuild) +
+                    "Passed max # iters ({}) to find an event set.  ".format(self.config.maxitertrynewbuild) +
                     "This board may not be feasible.  Try adding more folds in the tracks")
         self.buildSetIntoEvents()
 
@@ -248,9 +261,9 @@ class EventSetBuilder:
         prevEffLengths = cp.deepcopy(self.prevEffLengths_starter)
         while not self.tryEventSet(self.paramSet, prevEffLengths):
             builditer += 1
-            if builditer > gp.maxitertrynewbuild:
+            if builditer > self.config.maxitertrynewbuild:
                 raise Exception(
-                    "Passed max # iters ({}) to find an event set.  ".format(gp.maxitertrynewbuild) +
+                    "Passed max # iters ({}) to find an event set.  ".format(self.config.maxitertrynewbuild) +
                     "This board may not be feasible.  Try adding more folds in the tracks")
         self.buildSetIntoEvents()
 
@@ -272,8 +285,8 @@ class EventSetBuilder:
         prevEffLengths = cp.deepcopy(self.prevEffLengths_starter)
         while not self.tryEventSet(self.paramSet, prevEffLengths):
             builditer += 1
-            if builditer > gp.maxitertrynewbuild:
-                print("Passed max # iters ({}) to find an event set.  ".format(gp.maxitertrynewbuild) +
+            if builditer > self.config.maxitertrynewbuild:
+                print("Passed max # iters ({}) to find an event set.  ".format(self.config.maxitertrynewbuild) +
                       "This board may not be feasible.  Try adding more folds in the tracks")
                 return None
         self.paramSet.tempInsertParamsDb(optimizerRunSet, optimizerRun)
@@ -297,7 +310,7 @@ class EventSetBuilder:
         by simulating moves on the current track configuration.
         """
         start_time = time.time()
-        with contextlib.closing(sql.connect('etc/Optimizer.db')) as sqlConn:
+        with contextlib.closing(sql.connect(self.config.optimizer_db_path)) as sqlConn:
             with sqlConn:
                 with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
                     # Try retrieve benchmark moves
@@ -309,7 +322,7 @@ class EventSetBuilder:
             # Generate new benchmark moves out to double track length
             insertQuery = "INSERT INTO BenchmarkMoves VALUES(?,?,?,?,?)"
             for t in self.board.tracks:
-                with contextlib.closing(sql.connect('etc/Optimizer.db')) as sqlConn:
+                with contextlib.closing(sql.connect(self.config.optimizer_db_path)) as sqlConn:
                     with sqlConn:
                         with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
                             sqliteCursor.execute("BEGIN TRANSACTION")
@@ -322,7 +335,7 @@ class EventSetBuilder:
                             sqliteCursor.execute("END TRANSACTION")
 
             # Retrieve newly created benchmarks
-            with contextlib.closing(sql.connect('etc/Optimizer.db')) as sqlConn:
+            with contextlib.closing(sql.connect(self.config.optimizer_db_path)) as sqlConn:
                 with sqlConn:
                     with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
                         # Try retrieve benchmark moves
@@ -430,7 +443,7 @@ class EventSetBuilder:
         Returns:
             A tuple of four points defining the corners of the bounding box.
         """
-        ortho_dxdy = self.possibleEvents.orthogonal_vector(vector[0], vector[1], gp.eventminspacing / 2.0, False)
+        ortho_dxdy = self.possibleEvents.orthogonal_vector(vector[0], vector[1], self.config.eventminspacing / 2.0, False)
         revOrtho_dxdy = [(-1) * d for d in ortho_dxdy]
         corners = []
         for o in [ortho_dxdy, revOrtho_dxdy]:
@@ -447,7 +460,7 @@ class EventSetBuilder:
         Returns:
             List of (x, y) points representing the normalized length distribution curve.
         """
-        return self.getNormalizedIdealCurve(gp.eventlengthdisthistcurvefile)
+        return self.getNormalizedIdealCurve(self.config.eventlengthdisthistcurvefile)
 
     def getNormLengthOverTimeCurve(self):
         """
@@ -456,7 +469,7 @@ class EventSetBuilder:
         Returns:
             List of (x, y) points representing the length over time curve.
         """
-        return self.getNormalizedIdealCurve(gp.eventlengthovertimeidealcurve1file)
+        return self.getNormalizedIdealCurve(self.config.eventlengthovertimeidealcurve1file)
 
     def getEnergyCurve(self):
         """
@@ -466,7 +479,7 @@ class EventSetBuilder:
             Tuple containing the energy curve and its normalized integral.
         """
         # Normalize the coordinates
-        energyCurve = self.getNormalizedIdealCurve(gp.eventenergyfile)
+        energyCurve = self.getNormalizedIdealCurve(self.config.eventenergyfile)
 
         # Det integral
         normalizer = sum([e[1] for e in energyCurve])
@@ -720,7 +733,7 @@ class EventSetBuilder:
         # Figure out length of partial game
         movesAllTrials = 0
         if overrideIters < 0:
-            iters = gp.probminimodeliters
+            iters = self.config.probminimodeliters
         else:
             iters = overrideIters
 
@@ -739,7 +752,7 @@ class EventSetBuilder:
                     moveCounter = 0
                     # startLoc = self.benchmarkMoves_df.index.get_loc((track_id, trial, 0))
                     curReadSeq = self.track_dict[track_id][trial]
-                dealer = rd.randint(1, gp.numplayers)
+                dealer = rd.randint(1, self.config.numplayers)
                 curPos = 0
                 countLoops = 0
                 trackPosSeq = []
@@ -778,7 +791,7 @@ class EventSetBuilder:
                                 curPos = effHoleMap[curPos + curMove - 1]
                             movesAllTrials += 1
                             if curPos >= trackActualLength: break
-                        dealer = 1 + dealer % gp.numplayers
+                        dealer = 1 + dealer % self.config.numplayers
                     else:
                         # curMove = self.benchmarkMoves_df.iloc[startLoc + moveCounter]['MoveVal']
                         curMove = curReadSeq[moveCounter]
@@ -799,19 +812,21 @@ class EventSetBuilder:
 
             # Forecast length of game based on control-case ideal moves:hole ratio
             actualPartialMoves = (movesAllTrials / iters)
-            eventlessCtrlPartialMoves = (gp.ideallikelihoodholehit * trackActualLength)
+            eventlessCtrlPartialMoves = (self.config.ideallikelihoodholehit * trackActualLength)
             shiftPct = actualPartialMoves / eventlessCtrlPartialMoves
             forecastedTrackEffLengthHoles = trackActualLength * shiftPct
             return forecastedTrackEffLengthHoles, sequencesOfMoves
         else:
+            import markovgame as mg
+
             start_time = time.time()
             test = [len(t) for t in self.track_dict[track_id]]
-            forecastedTrackEffLengthHoles = mg.runPartialTrackEffLengthHoles(trackActualLength, gp.probminimodeliters,
+            forecastedTrackEffLengthHoles = mg.runPartialTrackEffLengthHoles(trackActualLength, self.config.probminimodeliters,
                                                                              self.track_dict[track_id],
                                                                              [len(t) for t in
                                                                               self.track_dict[track_id]],
                                                                              effHoleMap,
-                                                                             gp.numplayers, gp.ideallikelihoodholehit)
+                                                                             self.config.numplayers, self.config.ideallikelihoodholehit)
             end_time = time.time()
             self.miniMarkovTime += (end_time - start_time)
             return forecastedTrackEffLengthHoles, None
@@ -950,7 +965,7 @@ class EventSetBuilder:
                         if not canBeChute: continue
                         if not canBeChuteOnly: continue
                         if (explicitEvent is None and not candEventSpecs['event'].isOrtho and
-                                candEventSpecs['event'].crowLength < gp.mincrowvectordistcancel):
+                                candEventSpecs['event'].crowLength < self.config.mincrowvectordistcancel):
                             continue
                         if explicitEvent is not None and explicitLadder: continue
                         effEnergy = candEventSpecs['length']
@@ -964,7 +979,7 @@ class EventSetBuilder:
                         if not canBeLadder: continue
                         if not canBeLadderOnly: continue
                         if (explicitEvent is None and not candEventSpecs['event'].isOrtho and
-                                candEventSpecs['event'].crowLength < gp.mincrowvectordistcancel):
+                                candEventSpecs['event'].crowLength < self.config.mincrowvectordistcancel):
                             continue
                         if explicitEvent is not None and explicitChute: continue
                         effEnergy = candEventSpecs['length']
@@ -999,13 +1014,13 @@ class EventSetBuilder:
                 # NOTE: longer balanceandefflengthcontrolfactor for longer route
                 balFactor = params.tryGetParam(t['track_id'], 'balanceandefflengthcontrolfactor')
                 lengtheningControl, shorteningControl = balFactor, 1.0 - balFactor
-                curEstLengthDiscr = t['curestefflength'] - gp.effectiveboardlength
-                instEstLengthDiscr = effLengthForecast - gp.effectiveboardlength
+                curEstLengthDiscr = t['curestefflength'] - self.config.effectiveboardlength
+                instEstLengthDiscr = effLengthForecast - self.config.effectiveboardlength
                 if abs(curEstLengthDiscr) > 10:
                     sdfd = ""
                 instEstLengthDisp = effLengthForecast - t['curestefflength']
                 # Too much instability!  Nix this uber event
-                if instEstLengthDisp > gp.maxefflengthdisp: continue
+                if instEstLengthDisp > self.config.maxefflengthdisp: continue
 
                 curScore = 1.0  # Base amt
                 if curEstLengthDiscr != 0:
@@ -1016,19 +1031,19 @@ class EventSetBuilder:
                     if curEstLengthDiscr > 0:
                         # Apply shortening control, board is too long
                         if reward:
-                            # curScore = balScoreMod/gp.gamelengthtightness
-                            curScore = balScoreMod * math.pow((1.0 - shorteningControl), gp.gamelengthtightness)
+                            # curScore = balScoreMod/self.config.gamelengthtightness
+                            curScore = balScoreMod * math.pow((1.0 - shorteningControl), self.config.gamelengthtightness)
                         else:
-                            # curScore = balScoreMod*gp.gamelengthtightness
-                            curScore = balScoreMod * math.pow((1.0 + shorteningControl), gp.gamelengthtightness)
+                            # curScore = balScoreMod*self.config.gamelengthtightness
+                            curScore = balScoreMod * math.pow((1.0 + shorteningControl), self.config.gamelengthtightness)
                     elif curEstLengthDiscr < 0:
                         # Apply lengthening control, board is too short
                         if reward:
-                            # curScore = balScoreMod/gp.gamelengthtightness
-                            curScore = balScoreMod * math.pow((1.0 - lengtheningControl), gp.gamelengthtightness)
+                            # curScore = balScoreMod/self.config.gamelengthtightness
+                            curScore = balScoreMod * math.pow((1.0 - lengtheningControl), self.config.gamelengthtightness)
                         else:
-                            # curScore = balScoreMod*gp.gamelengthtightness
-                            curScore = balScoreMod * math.pow((1.0 + lengtheningControl), gp.gamelengthtightness)
+                            # curScore = balScoreMod*self.config.gamelengthtightness
+                            curScore = balScoreMod * math.pow((1.0 + lengtheningControl), self.config.gamelengthtightness)
 
                 if abs(effEnergy) + abs(t['energybuffer']) > 0:
                     curScore *= (1.0 + (params.tryGetParam(t['track_id'], 'energybufferenforcement')
@@ -1047,13 +1062,13 @@ class EventSetBuilder:
                 # #     curScore /= (1.0 - balFactor)/0.2
                 # # elif instType == en.InstanceEventType.CHUTEONLY and balFactor < 0.5:
                 # #     curScore /= balFactor/0.2
-                # curEstLengthDiscr = t['curestefflength'] - gp.effectiveboardlength
-                # instEstLengthDiscr = effLengthForecast - gp.effectiveboardlength
+                # curEstLengthDiscr = t['curestefflength'] - self.config.effectiveboardlength
+                # instEstLengthDiscr = effLengthForecast - self.config.effectiveboardlength
                 # if abs(curEstLengthDiscr) > 10:
                 #     sdfd=""
                 # instEstLengthDisp = effLengthForecast - t['curestefflength']
                 # #Too much instability!  Nix this uber event
-                # if instEstLengthDisp > gp.maxefflengthdisp: continue
+                # if instEstLengthDisp > self.config.maxefflengthdisp: continue
                 #
                 # if curEstLengthDiscr != 0:
                 #     #If board is perfect, leave it alone!  Highly unlikely tho except for inital run
@@ -1097,7 +1112,7 @@ class EventSetBuilder:
                             if abs(p) == 4:
                                 numTwoHitsLoose += 1
                             else:
-                                if gp.onlysamedirtwohits:
+                                if self.config.onlysamedirtwohits:
                                     twoHitInvalid = True
                                     break
                                 numTwoHits += 1
@@ -1123,7 +1138,7 @@ class EventSetBuilder:
                             if abs(p) == 4:
                                 numTwoHitsLoose += 1
                             else:
-                                if gp.onlysamedirtwohits:
+                                if self.config.onlysamedirtwohits:
                                     twoHitInvalid = True
                                     break
                                 numTwoHits += 1
@@ -1142,7 +1157,7 @@ class EventSetBuilder:
                             if abs(p) == 4:
                                 numTwoHitsLoose += 1
                             else:
-                                if gp.onlysamedirtwohits:
+                                if self.config.onlysamedirtwohits:
                                     twoHitInvalid = True
                                     break
                                 numTwoHits += 1
@@ -1169,7 +1184,7 @@ class EventSetBuilder:
                             if abs(p) == 4:
                                 numTwoHitsLoose += 1
                             else:
-                                if gp.onlysamedirtwohits:
+                                if self.config.onlysamedirtwohits:
                                     twoHitInvalid = True
                                     break
                                 numTwoHits += 1
@@ -1191,20 +1206,20 @@ class EventSetBuilder:
                                         break
                     if twoHitInvalid: continue
 
-                if len(twoHitNetLengths) > 0 and (min(twoHitNetLengths) < (-1) * gp.maxtwohitnetgainloss or
-                                                  max(twoHitNetLengths) > gp.maxtwohitnetgainloss):
+                if len(twoHitNetLengths) > 0 and (min(twoHitNetLengths) < (-1) * self.config.maxtwohitnetgainloss or
+                                                  max(twoHitNetLengths) > self.config.maxtwohitnetgainloss):
                     continue
 
                 if (numTwoHits > 0 and numTwoHits * params.tryGetParam(t['track_id'], 'twohitfreqimpedance') >
-                        (gp.allowabletwohits - t['twohitsthusfar'])):
+                        (self.config.allowabletwohits - t['twohitsthusfar'])):
                     continue
 
                 curScore *= (1.0 + (numTwoHits + numTwoHitsLoose / 2) * t['twohitsthusfar'] *
                              params.tryGetParam(t['track_id'], 'twohitfreqimpedance'))
 
                 # Impede score if too many ladders/chutes are getting cancelled
-                if instType != en.InstanceEventType.CHUTEANDLADDER and t['cancels'] >= gp.whenstartworryingaboutcancels:
-                    if t['cancels'] >= 2.5 * gp.whenstartworryingaboutcancels: continue
+                if instType != en.InstanceEventType.CHUTEANDLADDER and t['cancels'] >= self.config.whenstartworryingaboutcancels:
+                    if t['cancels'] >= 2.5 * self.config.whenstartworryingaboutcancels: continue
                     curScore *= (1.0 + params.tryGetParam(t['track_id'], 'cancelimpedance') * (t['cancels'] + 1)
                                  / (t['eventscount'] + 1))
 
@@ -1255,12 +1270,12 @@ class EventSetBuilder:
 
                 # Elminate options based on shortening & lengthening control
                 if (curEstLengthDiscr > 0 and shorteningControl > 0.5 and curScore > self.avgScore
-                        * gp.goodscorecutoffperc * 2 * (
+                        * self.config.goodscorecutoffperc * 2 * (
                                 1.0 - (2 * (shorteningControl - 0.5)))):
                     t['numnogos'] += 1
                     continue
                 elif (curEstLengthDiscr < 0 and lengtheningControl > 0.5 and curScore > self.avgScore
-                      * gp.goodscorecutoffperc * 2 * (
+                      * self.config.goodscorecutoffperc * 2 * (
                               1.0 - (2 * (lengtheningControl - 0.5)))):
                     t['numnogos'] += 1
                     continue
@@ -1284,7 +1299,7 @@ class EventSetBuilder:
         eventFitnesses.sort(key=lambda f: f['score'])
         end_time = time.time()
         self.scoringTime += end_time - start_time
-        if ((len(eventFitnesses) > 0 and eventFitnesses[0]['score'] <= self.avgScore * gp.goodscorecutoffperc * 2)
+        if ((len(eventFitnesses) > 0 and eventFitnesses[0]['score'] <= self.avgScore * self.config.goodscorecutoffperc * 2)
                 or explicitEvent is not None):
             return eventFitnesses
         if len(eventFitnesses) > 0: t['numdenies'] += 1
@@ -1335,11 +1350,11 @@ class EventSetBuilder:
                 sfds = ""
             for run in runs:
                 ortho = self.possibleEvents.orthogonal_vector(curEvent.startHole.coords, curEvent.endHole.coords,
-                                                              gp.maxloopyorthoeventdisplacementincrements
-                                                              * gp.eventminspacing, run['rev'])
+                                                              self.config.maxloopyorthoeventdisplacementincrements
+                                                              * self.config.eventminspacing, run['rev'])
                 floor, peak = self.possibleEvents.test_sidestep_events(
                     curEvent.startHole, curEvent.endHole, t['track'].trackholes, t['holecoords'],
-                    ortho, gp.maxloopyorthoeventdisplacementincrements * gp.eventminspacing, gp.eventminspacing,
+                    ortho, self.config.maxloopyorthoeventdisplacementincrements * self.config.eventminspacing, self.config.eventminspacing,
                     allVectorsTest, run['rev'], minIncr=run['minincr'], maxIncr=run['maxincr'], ignoreProximity=True)
                 if floor > 0 and floor < bestIncr:
                     bestIncr = floor
@@ -1353,11 +1368,11 @@ class EventSetBuilder:
                 else:
                     run = runs[1]
                 ortho = self.possibleEvents.orthogonal_vector(curEvent.startHole.coords, curEvent.endHole.coords,
-                                                              gp.maxloopyorthoeventdisplacementincrements
-                                                              * gp.eventminspacing, revOrtho)
+                                                              self.config.maxloopyorthoeventdisplacementincrements
+                                                              * self.config.eventminspacing, revOrtho)
                 self.possibleEvents.test_sidestep_events(
                     curEvent.startHole, curEvent.endHole, t['track'].trackholes, t['holecoords'],
-                    ortho, gp.maxloopyorthoeventdisplacementincrements * gp.eventminspacing, gp.eventminspacing,
+                    ortho, self.config.maxloopyorthoeventdisplacementincrements * self.config.eventminspacing, self.config.eventminspacing,
                     allVectorsTest, revOrtho, minIncr=run['minincr'], maxIncr=run['maxincr'], ignoreProximity=True,
                     debugTest=True)
                 return True, dict(incr=bestIncr, rev=revOrtho)
@@ -1401,7 +1416,7 @@ class EventSetBuilder:
                 t['candeventspecs'][t['candcursor']]['eventtop'] != hole.num): return None
 
         # Omit every 8th or so, feathering to avoid getting stuck in optimizer endless loops
-        if rd.randint(1, gp.randomfeatheringamount) == 1: return None
+        if rd.randint(1, self.config.randomfeatheringamount) == 1: return None
 
         # Skip if need to enforce min spacing to flesh out track
         if t['minspacectr'] < params.tryGetParam(t['track_id'], 'enforceminspacing'): return None
@@ -1574,7 +1589,7 @@ class EventSetBuilder:
                 - Average chute completion percentage across all viable tracks
         """
         for t in trackEventsOverview:
-            t['trackisstalled'] = t['trackstalledcounter'] > gp.maxitertrackstalled
+            t['trackisstalled'] = t['trackstalledcounter'] > self.config.maxitertrackstalled
             t['holescompletepct'] = t['curhole'] / len(t['track'].trackholes)
             t['chutescompletepct'] = len(t['eventsetbuild']) / t['optevents']
         viableTracks = [e for e in trackEventsOverview if not e['trackisstalled']]
@@ -1608,7 +1623,7 @@ class EventSetBuilder:
         trackEventsOverview = [dict(track=t, trackidx=t.num - 1, tracknum=t.num, optevents=0, track_id=t.Track_ID,
                                     optfirstchute=0, trackfilled=False, tracklength=len(t.trackholes),
                                     lengthdeviation=(
-                                                                len(t.trackholes) - gp.effectiveboardlength) / gp.effectiveboardlength,
+                                                                len(t.trackholes) - self.config.effectiveboardlength) / self.config.effectiveboardlength,
                                     spacinghisto=[], minspacectr=0,  # chosenscorecutoff=100,
                                     eventsetbuild=t.eventSetBuild, candeventspecs=[],
                                     lengthdistidealcurve=[], lengthdistactualhist=[],
@@ -1718,7 +1733,7 @@ class EventSetBuilder:
             trackEnergyIntegral = self.actualizeCurve(energyNormIntegral, t['track'].length,
                                                       candAvgEnergy * t['optevents'], integrate=True)
             t['trackenergyintegral'] = trackEnergyIntegral
-            t['compensationbuffer'] = t['lengthdeviation'] * gp.effectiveboardlength
+            t['compensationbuffer'] = t['lengthdeviation'] * self.config.effectiveboardlength
             t['track'].setTentativeEvents([])
             t['eventsetbuild'] = t['track'].eventSetBuild
 
@@ -1734,7 +1749,7 @@ class EventSetBuilder:
                len([t for t in trackEventsOverview if t['chutescompletepct'] <
                                                       1.0 * params.tryGetParam(t['track_id'],
                                                                                'maxchuteoverdrivepct')]) > 0 and
-               stallCounter <= gp.maxitertrynewbuild):
+               stallCounter <= self.config.maxitertrynewbuild):
             # if len([t for t in trackEventsOverview if t['holescompletepct'] < 0.9]) == 0:
             #     sfds=""
             if avgHolePct > 0.5:
@@ -1882,7 +1897,7 @@ class EventSetBuilder:
             effLength = self.runPartialTrackEffLengthHoles(t['track_id'], t['eventsetbuild'],
                                                            t['tracklength'],
                                                            readMode=True)[0] * (t['tracklength'] / t['controllength'])
-            if abs(effLength - gp.effectiveboardlength) <= gp.minqualityboardlengthmatching:
+            if abs(effLength - self.config.effectiveboardlength) <= self.config.minqualityboardlengthmatching:
                 # Lock this in!
                 t['track'].instLocked = True
 
@@ -1913,10 +1928,10 @@ class EventSetBuilder:
         for l in effLengths:
             print("Track {} has effective length of {}, which should yield an approx {} balance"
                   .format(l['track_id'], l['efflength'],
-                          (gp.effectiveboardlength - l['efflength']) / gp.effectiveboardlength))
+                          (self.config.effectiveboardlength - l['efflength']) / self.config.effectiveboardlength))
 
-        if (max([abs(l['efflength'] - gp.effectiveboardlength) for l in effLengths])
-                > gp.minqualityboardlengthmatching):
+        if (max([abs(l['efflength'] - self.config.effectiveboardlength) for l in effLengths])
+                > self.config.minqualityboardlengthmatching):
             # Massage balanceandefflengthcontrolfactor and retry
             # Longer balanceandefflengthcontrolfactor for longer route
             for l in effLengths:
@@ -1924,19 +1939,19 @@ class EventSetBuilder:
                 oldVal = self.paramSet.tryGetParam(l['track_id'], "balanceandefflengthcontrolfactor")
                 newVal = oldVal
                 # Take avg of this eff length and prev, to smooth out jumps
-                prevEffLength, prevEffIdx = gp.effectiveboardlength, -1
+                prevEffLength, prevEffIdx = self.config.effectiveboardlength, -1
                 for l_prv_idx in range(0, len(prevEffLengths)):
                     if prevEffLengths[l_prv_idx]['track_id'] == l['track_id']:
                         prevEffIdx = l_prv_idx
                         prevEffLength = prevEffLengths[l_prv_idx]['efflength']
                         break
 
-                if (prevEffLength + l['efflength']) / 2 < gp.effectiveboardlength - gp.minqualityboardlengthmatching:
+                if (prevEffLength + l['efflength']) / 2 < self.config.effectiveboardlength - self.config.minqualityboardlengthmatching:
                     # Increase factor to lengthen board
-                    newVal = oldVal + gp.minqualityboardlengthintervalsrpt
-                elif (prevEffLength + l['efflength']) / 2 > gp.effectiveboardlength + gp.minqualityboardlengthmatching:
+                    newVal = oldVal + self.config.minqualityboardlengthintervalsrpt
+                elif (prevEffLength + l['efflength']) / 2 > self.config.effectiveboardlength + self.config.minqualityboardlengthmatching:
                     # Decrease factor to shorten board
-                    newVal = oldVal - gp.minqualityboardlengthintervalsrpt
+                    newVal = oldVal - self.config.minqualityboardlengthintervalsrpt
                 if newVal > 0.95:
                     newVal = 0.95
                 elif newVal < 0.05:
@@ -2224,9 +2239,9 @@ class OrthoLineTrace:
         midpoint = tuple([sum(c) / 2 for c in zip(self.event.startHole.coords, self.event.endHole.coords)])
         orthogonal_vector = tuple([(-1 if rev else 1) * o for o in self.event.orthoVector])
         orthogonal_vector = possibleEvents.orthogonal_vector(self.event.startHole.coords, self.event.endHole.coords,
-                                                             gp.maxloopyorthoeventdisplacementincrements
-                                                             * gp.eventminspacing, rev)
-        length_divider = incr / gp.maxloopyorthoeventdisplacementincrements
+                                                             possibleEvents.config.maxloopyorthoeventdisplacementincrements
+                                                             * possibleEvents.config.eventminspacing, rev)
+        length_divider = incr / possibleEvents.config.maxloopyorthoeventdisplacementincrements
         match type:
             case en.OrthoLineTraceType.START:
                 p1 = self.event.startHole.coords
@@ -2328,7 +2343,7 @@ class ParamSet:
             optimizerRunSet: Identifier for the optimizer run set.
             optimizerRun: Identifier for the specific optimizer run.
         """
-        with contextlib.closing(sql.connect('etc/Optimizer.db')) as sqlConn:
+        with contextlib.closing(sql.connect(self.board.config.optimizer_db_path)) as sqlConn:
             with sqlConn:
                 self.params = []
                 paramsQuery_sb = StringIO()
@@ -2355,7 +2370,7 @@ class ParamSet:
         This sets up default parameter values that are in the middle of their
         allowed ranges to provide a good starting point for optimization.
         """
-        with contextlib.closing(sql.connect('etc/Optimizer.db')) as sqlConn:
+        with contextlib.closing(sql.connect(self.board.config.optimizer_db_path)) as sqlConn:
             with sqlConn:
                 with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
                     # Retrieve base values from db
@@ -2405,7 +2420,7 @@ class ParamSet:
         Randomly samples parameter values within their defined ranges to find
         optimal configurations for event generation.
         """
-        with contextlib.closing(sql.connect('etc/Optimizer.db')) as sqlConn:
+        with contextlib.closing(sql.connect(self.board.config.optimizer_db_path)) as sqlConn:
             with sqlConn:
                 with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
                     # Retrieve base values from db
@@ -2456,7 +2471,7 @@ class ParamSet:
             optimizerRunSet: Identifier for the optimizer run set.
             optimizerRun: Identifier for the specific optimizer run.
         """
-        with contextlib.closing(sql.connect('etc/Optimizer.db')) as sqlConn:
+        with contextlib.closing(sql.connect(self.board.config.optimizer_db_path)) as sqlConn:
             with sqlConn:
                 with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
                     query = "INSERT INTO OptimizerRuns (OptimizerRunSet, OptimizerRun, Board_ID, Timestamp) VALUES (?,?,?,?)"
@@ -2501,7 +2516,7 @@ class ParamSet:
             - Creates necessary tables if they don't exist
             - Records metrics in a transaction for data consistency
         """
-        with contextlib.closing(sql.connect('etc/Optimizer.db')) as sqlConn:
+        with contextlib.closing(sql.connect(self.board.config.optimizer_db_path)) as sqlConn:
             with sqlConn:
                 with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
 
@@ -2556,7 +2571,7 @@ class ParamSet:
             - Tracks both chutes and ladders with their properties
             - Updates the database with the current best event configuration
         """
-        with contextlib.closing(sql.connect('etc/Optimizer.db')) as sqlConn:
+        with contextlib.closing(sql.connect(self.board.config.optimizer_db_path)) as sqlConn:
             with sqlConn:
                 with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
                     # Cache events hit in db
