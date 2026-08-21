@@ -24,3 +24,17 @@ pytest-cov>=4.0
 #   - scoretree   (build via ScoreTreeTry2/setup.py)
 #   - markovgame  (build via MarkovBind/setup.py)
 # --------------------------------------------------------------------------
+
+# --------------------------------------------------------------------------
+# Phase 3 (Board/geometry) test notes:
+#   - test_base_layout.py: stdlib only (xml.dom.minidom), no heavy deps.
+#   - test_board.py: needs pandas (via cribsandladders.Board); does NOT
+#     need matplotlib -- PossibleEvents is now imported lazily inside
+#     Board.setBoardAfterSetter's findmode branch instead of at module
+#     scope, specifically so importing Board.py doesn't require it.
+#   - test_board_setter.py: needs pandas; the integration tests use a
+#     real (temp) sqlite db, stdlib sqlite3 only.
+#   - test_dxf_writer.py: the dxf_geometry unit tests need only numpy.
+#     The one buildDXFFile integration test uses pytest.importorskip
+#     ("ezdxf") and is skipped (not failed) if ezdxf isn't installed.
+# --------------------------------------------------------------------------

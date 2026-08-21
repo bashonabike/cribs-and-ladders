@@ -1,27 +1,37 @@
-import game_params as gp
 import pandas as pd
 import sqlite3 as sql
 import os
 import cribsandladders.Board as bd
+from cribsandladders.config import GameConfig, DEFAULT_CONFIG
 
+# Kept for backward compatibility with anything importing this name
+# directly; setBoardFromDb itself now resolves the path from
+# config.db_path (see GameConfig.data_root), which is what fixes the
+# previously-hardcoded 'Boards/AllBoards.db' literal that was also
+# duplicated inline in the sql.connect() call below.
 boardDBName = 'Boards/AllBoards.db'
 
 
-def setBoardFromDb(board, boardName):
+def setBoardFromDb(board, boardName, config: GameConfig = DEFAULT_CONFIG):
     """
     Populates a Board object with data retrieved from the SQLite database.
 
     Args:
         board (bd.Board): The board object instance to be populated.
         boardName (str): The unique name of the board to search for in the database.
+        config (GameConfig): game configuration (defaults to the module-level
+            DEFAULT_CONFIG). Determines the db path (config.db_path),
+            whether findmode stub-tracks are built, and whether two-deck
+            track lengths are used.
 
     Raises:
         Exception: If the database file is missing or if no board/track data is found.
     """
-    if not os.path.isfile(boardDBName):
-        raise Exception("Board DB file {} not found!".format(boardDBName))
+    db_path = config.db_path
+    if not os.path.isfile(db_path):
+        raise Exception("Board DB file {} not found!".format(db_path))
 
-    sqliteConn = sql.connect('Boards/AllBoards.db')
+    sqliteConn = sql.connect(db_path)
     sqliteCursor = sqliteConn.cursor()
 
     # get board/track-level data
@@ -43,7 +53,7 @@ def setBoardFromDb(board, boardName):
     board.width = float(boardAndTracks_df.iloc[0]['Width'])
     board.height = float(boardAndTracks_df.iloc[0]['Height'])
 
-    if gp.findmode:
+    if config.findmode:
         # just set up blank track stubs
         board.twoDeckLineBoardPath = boardAndTracks_df.iloc[0]['TwoDeckLineBoardPath']
         if (boardAndTracks_df.iloc[0]['Track_ID'] in (None, 0) or
@@ -86,50 +96,74 @@ def setBoardFromDb(board, boardName):
         if len(ladders_df) > 0:
             ladders_df.sort_values(['Track_ID', 'start'])
 
-        # set track-level info
-        batch_ladders = []
-        batch_chutes = []
+        hydrate_tracks_from_dataframes(board, boardAndTracks_df, chutes_df, ladders_df, config=config)
 
-        for index, track_sr in boardAndTracks_df.iterrows():
-            curtrack = bd.Track()
-            curtrack.num = int(track_sr['tracknum'])
-            curtrack.length = int(track_sr['length'])
-            if int(track_sr.loc['twodeck']) > 0:
-                curtrack.twodeckslength = int(track_sr['twodecklength'])
-            else:
-                curtrack.twodeckslength = int(track_sr['length'])
-            curtrack.efflength = curtrack.twodeckslength if gp.twodecks else curtrack.length
-            board.tracks.append(curtrack)
 
-            if len(chutes_df) > 0:
-                # set chute-level info
-                trackchutes_df = chutes_df.query("Track_ID == {}".format(track_sr['Track_ID']))
-                for index, chute_sr in trackchutes_df.iterrows():
-                    start = int(chute_sr['start'])
-                    end = int(chute_sr['end'])
-                    batch_chutes.append(bd.Chute(start, end, curtrack.num))
+def hydrate_tracks_from_dataframes(board, boardAndTracks_df, chutes_df, ladders_df, config: GameConfig = DEFAULT_CONFIG):
+    """
+    Builds Track/Chute/Ladder domain objects onto `board` (mutated in
+    place) purely from already-fetched DataFrames -- no sqlite, no
+    filesystem. This is the entire non-findmode branch of
+    setBoardFromDb, pulled out so it's unit-testable with small
+    hand-built DataFrames instead of a real database.
 
-            if len(ladders_df) > 0:
-                # set ladder-level info
-                trackladders_df = ladders_df.query("Track_ID == {}".format(track_sr.loc['Track_ID']))
-                for index, ladder_sr in trackladders_df.iterrows():
-                    start = int(ladder_sr['start'])
-                    end = int(ladder_sr['end'])
-                    batch_ladders.append(bd.Ladder(start, end, curtrack.num))
+    Args:
+        board (bd.Board): board to populate; board.tracks is appended to
+            and is expected to start empty.
+        boardAndTracks_df (pd.DataFrame): one row per track, with columns
+            Track_ID, tracknum, length, twodeck, twodecklength.
+        chutes_df (pd.DataFrame): columns Track_ID, Chute_ID, start, end.
+            May be empty (no chutes for this board).
+        ladders_df (pd.DataFrame): columns Track_ID, Ladder_ID, start, end.
+            May be empty (no ladders for this board).
+        config (GameConfig): only config.twodecks is read, to decide
+            whether a track's efflength uses its two-deck or
+            single-deck length.
+    """
+    # set track-level info
+    batch_ladders = []
+    batch_chutes = []
 
-        # Set final chutes & ladders, merging all-track events with track-specific events for each track
-        for curtrack in board.tracks:
-            if len(chutes_df) > 0:
-                (curtrack.setChutes(sorted([full_tracks for full_tracks in batch_chutes if full_tracks.track in
-                                            {0, curtrack.num}], key=lambda x: x.start)))
-                curtrack.setEventChutes([c.start for c in curtrack.chutes])
-            if len(ladders_df) > 0:
-                (curtrack.setLadders(sorted([full_tracks for full_tracks in batch_ladders if full_tracks.track in
-                                             {0, curtrack.num}], key=lambda x: x.start)))
-                curtrack.setEventLadders([l.start for l in curtrack.ladders])
+    for index, track_sr in boardAndTracks_df.iterrows():
+        curtrack = bd.Track()
+        curtrack.num = int(track_sr['tracknum'])
+        curtrack.length = int(track_sr['length'])
+        if int(track_sr.loc['twodeck']) > 0:
+            curtrack.twodeckslength = int(track_sr['twodecklength'])
+        else:
+            curtrack.twodeckslength = int(track_sr['length'])
+        curtrack.efflength = curtrack.twodeckslength if config.twodecks else curtrack.length
+        board.tracks.append(curtrack)
 
-            # Set descriptive stats
-            curtrack.setEventImpedance()
+        if len(chutes_df) > 0:
+            # set chute-level info
+            trackchutes_df = chutes_df.query("Track_ID == {}".format(track_sr['Track_ID']))
+            for index, chute_sr in trackchutes_df.iterrows():
+                start = int(chute_sr['start'])
+                end = int(chute_sr['end'])
+                batch_chutes.append(bd.Chute(start, end, curtrack.num))
+
+        if len(ladders_df) > 0:
+            # set ladder-level info
+            trackladders_df = ladders_df.query("Track_ID == {}".format(track_sr.loc['Track_ID']))
+            for index, ladder_sr in trackladders_df.iterrows():
+                start = int(ladder_sr['start'])
+                end = int(ladder_sr['end'])
+                batch_ladders.append(bd.Ladder(start, end, curtrack.num))
+
+    # Set final chutes & ladders, merging all-track events with track-specific events for each track
+    for curtrack in board.tracks:
+        if len(chutes_df) > 0:
+            (curtrack.setChutes(sorted([full_tracks for full_tracks in batch_chutes if full_tracks.track in
+                                        {0, curtrack.num}], key=lambda x: x.start)))
+            curtrack.setEventChutes([c.start for c in curtrack.chutes])
+        if len(ladders_df) > 0:
+            (curtrack.setLadders(sorted([full_tracks for full_tracks in batch_ladders if full_tracks.track in
+                                         {0, curtrack.num}], key=lambda x: x.start)))
+            curtrack.setEventLadders([l.start for l in curtrack.ladders])
+
+        # Set descriptive stats
+        curtrack.setEventImpedance()
 
 
 def getData(cursor, query, errorText, overrideException=False):

@@ -1,10 +1,10 @@
 from xml.dom import minidom
-import game_params as gp
+from cribsandladders.config import GameConfig, DEFAULT_CONFIG
 
 #########################
 #Public methods
 #########################
-def setTrackHolesets(tracks, boardHeight, twoDeckLineBoardPath = ""):
+def setTrackHolesets(tracks, boardHeight, twoDeckLineBoardPath = "", config: GameConfig = DEFAULT_CONFIG):
     """
     Sets the track holesets for each track in the given list of tracks.
 
@@ -12,6 +12,7 @@ def setTrackHolesets(tracks, boardHeight, twoDeckLineBoardPath = ""):
         tracks (list): List of Track objects.
         boardHeight (int): Height of the board.
         twoDeckLineBoardPath (str, optional): Path to the two deck line board file. Defaults to "".
+        config (GameConfig): game configuration (defaults to the module-level DEFAULT_CONFIG).
 
     Returns:
         None
@@ -25,7 +26,7 @@ def setTrackHolesets(tracks, boardHeight, twoDeckLineBoardPath = ""):
         track.setHolesetIndexer()
 
         #REMOVED two deck line since 2 decks don really speed up the game much
-        if gp.findmode:
+        if config.findmode:
             track.length = len(track.trackholes)
             track.efflength = track.length
             track.twodeckslength = track.length

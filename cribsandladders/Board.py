@@ -1,8 +1,7 @@
-import game_params as gp
 import pandas as pd
 import cribsandladders.BaseLayout as bs
-import cribsandladders.PossibleEvents as ps
 import bisect as bsc
+from cribsandladders.config import GameConfig, DEFAULT_CONFIG
 
 boardDBName = 'Boards/AllBoards.db'
 
@@ -11,8 +10,15 @@ class Board:
     Represents a game board consisting of multiple tracks, events, and spatial dimensions.
     """
 
-    def __init__(self):
-        """Initializes a new Board instance with default values."""
+    def __init__(self, config: GameConfig = DEFAULT_CONFIG):
+        """Initializes a new Board instance with default values.
+
+        Args:
+            config (GameConfig): game configuration (defaults to the
+                module-level DEFAULT_CONFIG). Controls findmode branching
+                in setBoardAfterSetter.
+        """
+        self.config = config
         self.boardName = ""
         self.boardID = 0
         self.width = 0.0
@@ -46,9 +52,17 @@ class Board:
         """
         Initializes track hole sets and possible events if findmode is enabled.
         Used after the board configuration has been set.
+
+        PossibleEvents is imported lazily here (rather than at module
+        scope) because it pulls in matplotlib; that means `import
+        cribsandladders.Board` -- and everything that transitively
+        imports it (CribbageGame, EventSetBuilder, ...) -- no longer
+        requires matplotlib to be installed unless this findmode branch
+        actually runs.
         """
-        if gp.findmode:
-            bs.setTrackHolesets(self.tracks, self.height, self.twoDeckLineBoardPath)
+        if self.config.findmode:
+            bs.setTrackHolesets(self.tracks, self.height, self.twoDeckLineBoardPath, config=self.config)
+            import cribsandladders.PossibleEvents as ps
             self.possibleEvents = ps.PossibleEvents(self)
 
     def clearBoard(self):
@@ -175,6 +189,16 @@ class Track:
                 chute_index = bsc.bisect_left(self.eventsListChute, i + 1)
                 if (chute_index < len(self.eventsListChute) and
                         self.eventsListChute[chute_index] == i + 1):
+                    # TODO(liam): this uses chute.start, not chute.end -- since
+                    # eventsListChute is itself built from chute *start*
+                    # positions, landing on a chute's start hole maps back to
+                    # that same start hole, i.e. a no-op. The ladder branch
+                    # below correctly uses ladder.end. Looks like a copy-paste
+                    # asymmetry rather than intentional behavior; needs
+                    # investigation before changing since it may affect
+                    # existing board data/scoring. See
+                    # tests/test_board.py::test_set_eff_landing_for_holes_redirects_through_ladder_but_not_chute
+                    # for a characterization test pinning down current behavior.
                     effLanding = self.chutes[chute_index].start
                     #There should never be both chute and ladder on same space!
                 ladder_index = bsc.bisect_left(self.eventsListLadder, (i+1))
