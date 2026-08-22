@@ -166,12 +166,80 @@ extensions). `pytest -m integration` is the rest.
     reason (`track1.candidateEvents` is `None` in the shared fixture, a
     pre-existing gap flagged by the original author's own TODO, unrelated
     to this migration) rather than papered over.
-  - **Not done, by explicit scoping decision**: `EventSetBuilder.py` is
-    2600+ lines and still one god class -- decomposing it into smaller,
-    independently-testable units was scoped out of Phase 4 as a distinct,
-    deeper design task rather than rushed. Config injection and the
-    import-hygiene/persistence-path fixes above were still applied to it,
-    but its internals are otherwise unchanged.
+  - **EventSetBuilder decomposition (follow-up to the above)**:
+    `EventSetBuilder.py` was 2669 lines and defined four classes
+    (`EventSetBuilder`, `OrthoPath`, `OrthoLineTrace`, `ParamSet`) in one
+    file. It's now 1863 lines and one class. What moved out, each into
+    its own module with its own test file:
+    - `cribsandladders/ortho_path.py` (`OrthoPath`) and
+      `cribsandladders/ortho_line_trace.py` (`OrthoLineTrace`) -- neither
+      ever depended on anything off `EventSetBuilder` itself (`OrthoPath`
+      is a plain data holder; `OrthoLineTrace` only needs a duck-typed
+      `possibleEvents`), so they moved verbatim. Covered by
+      `test_ortho_path_and_line_trace.py`, including two tests asserting
+      `EventSetBuilder.py` still re-exports the identical class objects.
+    - `cribsandladders/param_set.py` (`ParamSet`) -- the Monte-Carlo/
+      midpoint/fmin parameter-search class, also moved verbatim (only
+      ever needed `board`/`tracks`). `test_eventsetbuilder.py`'s
+      `TestParamSet` (already rewritten for config injection, see above)
+      needed no changes since the import
+      (`from cribsandladders.EventSetBuilder import ParamSet`) still
+      resolves via the re-export.
+    - `cribsandladders/event_curve_math.py` -- pure functions pulled out
+      of a dozen `EventSetBuilder` methods (`actualizeCurve`,
+      `discretizeCurve`, `normalizeCurveMagnitude`,
+      `integrateAndNormalizeCurve`, `getNormalizedIdealCurve`,
+      `getPointsInProximity`, `tryGetDispAllowance`,
+      `searchOrderedListForVal`, `indexStartOfEachHoleInCands`,
+      `recalcTrackCompletionPcts`, `orthoBoundingBox`,
+      `boundingBoxPlusVector`), plus a new
+      `build_track_dict_from_benchmark_moves_df` pulled out of
+      `retrieveOrGenerateBenchmarkMoves`'s DataFrame-to-dict hydration
+      (same idea as Phase 3/4's other `hydrate_*` extractions). Covered
+      by `test_event_curve_math.py` (19 tests, zero mocking needed --
+      every function here is a plain function of its arguments). Found
+      and pinned down one more pre-existing quirk along the way:
+      `discretize_curve(..., accumulate=True)`'s bucket-boundary check
+      (`curveIdx < i * discFactor`) makes the accumulation lag by one
+      bucket (bucket 0 always comes out `0.0` regardless of the curve's
+      actual values) -- not fixed, just characterized. Also discovered
+      `indexStartOfEachHoleInCands` has zero call sites anywhere in the
+      repo (confirmed by grep) and its own body implies
+      `trackEventOverview` must be a `dict` keyed by both int and the
+      string `'candeventstartlookup'` it adds -- documented in the test
+      rather than guessed at silently.
+    - `cribsandladders/event_set_plotter.py` -- the refactor plan's "thin
+      plotting adapter tests can no-op." `EventSetBuilder.__init__` now
+      takes an optional `plotter` (defaults to a real `EventSetPlotter`);
+      `plotBoard`/`testPlotVectorsOnHoles`/`plot_coordinates_and_vectors`
+      delegate to it. `test_event_set_plotter.py` discovered that
+      `EventSetPlotter`'s real methods end in `plt.waitforbuttonpress()`,
+      which blocks forever even under matplotlib's non-interactive `Agg`
+      backend (confirmed by hand: `timeout 5 python3 -c "...plt.show();
+      plt.waitforbuttonpress()"` hits the timeout) -- so those tests
+      patch `event_set_plotter.plt` with a `MagicMock` rather than
+      calling real matplotlib, and a separate `NoOpEventSetPlotter` is
+      what tests should actually inject into `EventSetBuilder` when they
+      don't care about plotting at all (see
+      `test_eventsetbuilder.py::test_accepts_injected_plotter`).
+    - **What's still one class, on purpose**: the actual event-search/
+      placement algorithm (`scoreEventsForHole` alone is ~470 lines;
+      `tryEventSet`, `tryGetEventForHole`, `runPartialTrackEffLengthHoles`,
+      `updateVectorsTest`, `buildPartialSetIntoTrack`,
+      `getEffectorsForDisps`) stayed in `EventSetBuilder` itself. These
+      methods share mutable state across a single build attempt (the
+      `allVectorsTest`/`baseVectorsTest` collision sets, in-place
+      `trackEventsOverview` dicts, `t.eventSetBuild` mutation) in ways
+      that don't decompose into independently-callable pure units
+      without redesigning the algorithm's control flow, not just moving
+      code -- a deeper task than "extract the already-separable pieces,"
+      consistent with why this was flagged as the biggest lift in the
+      original refactor plan.
+    - Every moved method kept a thin delegating wrapper on
+      `EventSetBuilder` (e.g. `actualizeCurve` now just calls
+      `event_curve_math.actualize_curve(...)`), so no existing call
+      site -- production code (`cribbage_main.py`) or the rest of the
+      test suite -- needed to change.
 - `test_integration_*.py` -- Phase 5.
 
 ## Fixtures

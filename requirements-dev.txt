@@ -72,3 +72,26 @@ pytest-cov>=4.0
 #   lightgbm, scikit-learn, markovgame, or matplotlib to run their
 #   non-integration tests -- only pandas/numpy/stdlib.
 # --------------------------------------------------------------------------
+
+# --------------------------------------------------------------------------
+# Phase 4 EventSetBuilder decomposition follow-up (splitting
+# EventSetBuilder.py's god class into smaller units -- see tests/README.md
+# for the full breakdown):
+#   - test_event_curve_math.py: pure functions, needs numpy only (plus
+#     pandas for the one benchmark-moves-hydration test). No matplotlib,
+#     no sqlite, no board/track objects.
+#   - test_ortho_path_and_line_trace.py: stdlib only (Enums.py), no
+#     numpy/pandas/matplotlib needed at all.
+#   - test_event_set_plotter.py: needs matplotlib to import (it's already
+#     installed in this sandbox, unlike scipy/lightgbm/markovgame, so
+#     this isn't an import-hygiene concern the way the others were) --
+#     but every EventSetPlotter test patches
+#     cribsandladders.event_set_plotter.plt with a MagicMock, since the
+#     real plt.waitforbuttonpress() call blocks forever even under the
+#     non-interactive Agg backend. NoOpEventSetPlotter's tests need no
+#     patching at all.
+#   test_eventsetbuilder.py itself has the same dependency footprint as
+#   before (pandas + numpy via cribsandladders.Board) -- the decomposition
+#   didn't change what it needs, since every moved method kept a thin
+#   delegating wrapper.
+# --------------------------------------------------------------------------

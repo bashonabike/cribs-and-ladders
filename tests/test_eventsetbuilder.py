@@ -41,6 +41,21 @@
 #     param['min']/param['max'], keys midpointInitParams/monteCarlo
 #     never actually put in the dicts they build (only
 #     track_id/param/value).
+#
+# Further updated for the Phase 4 "decompose EventSetBuilder" follow-up
+# work: OrthoPath/OrthoLineTrace/ParamSet moved out to their own
+# modules (cribsandladders/ortho_path.py, ortho_line_trace.py,
+# param_set.py -- see test_ortho_path_and_line_trace.py for their
+# dedicated tests), pure curve/geometry helper methods moved to
+# cribsandladders/event_curve_math.py (see test_event_curve_math.py),
+# and the three matplotlib-calling plotting methods moved to a new
+# `self.plotter` (cribsandladders/event_set_plotter.py, see
+# test_event_set_plotter.py). `from cribsandladders.EventSetBuilder
+# import EventSetBuilder, ParamSet` below still works unchanged --
+# EventSetBuilder.py re-exports all three moved classes -- and every
+# moved method kept a thin delegating wrapper here, so this file's
+# existing tests needed no changes for the decomposition itself. What's
+# new below is coverage of the injectable `plotter` seam specifically.
 
 import sqlite3
 import tempfile
@@ -163,6 +178,37 @@ class TestEventSetBuilder(unittest.TestCase):
         # that actually proves this reads the injected config per-instance
         # rather than some shared/cached game_params-style global.
         self.assertNotEqual(builder_2p.posHandProbs, self.builder.posHandProbs)
+
+    def test_defaults_to_real_event_set_plotter_when_not_given(self):
+        from cribsandladders.event_set_plotter import EventSetPlotter
+        self.assertIsInstance(self.builder.plotter, EventSetPlotter)
+
+    def test_accepts_injected_plotter(self):
+        from cribsandladders.event_set_plotter import NoOpEventSetPlotter
+        noop = NoOpEventSetPlotter()
+        with mock.patch(
+            'cribsandladders.EventSetBuilder.EventSetBuilder.retrieveOrGenerateBenchmarkMoves',
+            return_value=None,
+        ):
+            builder = EventSetBuilder(self.mock_board, self.mock_possible_events,
+                                      config=self.config, plotter=noop)
+        self.assertIs(builder.plotter, noop)
+
+    def test_plot_board_delegates_to_plotter(self):
+        self.builder.plotter = mock.MagicMock()
+        self.builder.plotBoard()
+        self.builder.plotter.plot_board.assert_called_once_with(self.builder)
+
+    def test_test_plot_vectors_on_holes_delegates_to_plotter(self):
+        self.builder.plotter = mock.MagicMock()
+        vectors = [((0, 0), (1, 1))]
+        self.builder.testPlotVectorsOnHoles(vectors)
+        self.builder.plotter.test_plot_vectors_on_holes.assert_called_once_with(self.builder, vectors)
+
+    def test_plot_coordinates_and_vectors_delegates_to_plotter(self):
+        self.builder.plotter = mock.MagicMock()
+        self.builder.plot_coordinates_and_vectors(bitmap_name='foo.png')
+        self.builder.plotter.plot_coordinates_and_vectors.assert_called_once_with(self.builder, 'foo.png')
 
     def test_clear_event_set(self):
         """Test that clearEventSet resets all relevant attributes."""

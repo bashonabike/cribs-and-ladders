@@ -12,20 +12,20 @@
 import math
 import random as rd
 
-import cribsandladders.BaseLayout as bse
 import cribsandladders.Board as bd
-import matplotlib.pyplot as plt
 import numpy as np
 import copy as cp
 import Enums as en
 import bisect as bsc
 import pandas as pd
 import sqlite3 as sql
-from datetime import datetime as dt
-from io import StringIO
 import contextlib
-from collections import defaultdict
 from cribsandladders.config import GameConfig, DEFAULT_CONFIG
+from cribsandladders import event_curve_math
+from cribsandladders.event_set_plotter import EventSetPlotter
+from cribsandladders.ortho_path import OrthoPath  # noqa: F401 -- backward-compat re-export
+from cribsandladders.ortho_line_trace import OrthoLineTrace
+from cribsandladders.param_set import ParamSet
 
 # NOTE: markovgame (a compiled pybind11 extension, Tier 4 per the TDD
 # refactor assessment -- outside Python unit-test reach) is imported
@@ -37,6 +37,24 @@ from cribsandladders.config import GameConfig, DEFAULT_CONFIG
 # extension built. Mirrors the Phase 2 fix to Player.py's scoretree
 # import and the other Phase 4 import-hygiene fixes in this pass
 # (Evaluator's scipy.optimize, Optimizer's lightgbm/sklearn).
+
+# NOTE (Phase 4 decomposition follow-up): this file used to also
+# define OrthoPath, OrthoLineTrace, and ParamSet inline (none of them
+# actually needed anything off EventSetBuilder itself), plus a batch of
+# pure curve/geometry helper methods and three matplotlib-calling
+# plotting methods. Those have moved out into
+# cribsandladders/ortho_path.py, ortho_line_trace.py, param_set.py,
+# event_curve_math.py, and event_set_plotter.py respectively --
+# EventSetBuilder now focuses on the actual event-search/placement
+# algorithm (scoreEventsForHole, tryEventSet, tryGetEventForHole,
+# runPartialTrackEffLengthHoles, etc.), which is still one large class
+# because that algorithm's steps are too interdependent (shared
+# mutable vector-test sets, in-place track/hole state) to split further
+# without a much deeper redesign than "extract the already-separable
+# pieces." The methods that moved keep thin delegating wrappers here
+# (actualizeCurve, discretizeCurve, plotBoard, etc.) so every existing
+# call site -- production code and tests alike -- keeps working
+# unchanged.
 
 import time
 
@@ -74,7 +92,7 @@ class EventSetBuilder:
         avgScore: Calculated average score.
     """
 
-    def __init__(self, board, possibleEvents, config: GameConfig = DEFAULT_CONFIG):
+    def __init__(self, board, possibleEvents, config: GameConfig = DEFAULT_CONFIG, plotter=None):
         """
         Initialize the EventSetBuilder with a game board and possible events.
 
@@ -83,10 +101,16 @@ class EventSetBuilder:
             possibleEvents: Object containing possible events that can be placed on the board.
             config (GameConfig): game configuration (defaults to the
                 module-level DEFAULT_CONFIG).
+            plotter: object implementing plot_board/test_plot_vectors_on_holes/
+                plot_coordinates_and_vectors (defaults to a real
+                `EventSetPlotter`). Tests can pass a
+                `NoOpEventSetPlotter` instead to avoid matplotlib
+                popups/file writes.
         """
         self.board = board
         self.possibleEvents = possibleEvents
         self.config = config
+        self.plotter = plotter if plotter is not None else EventSetPlotter()
         self.allTentLengthHisto = []
         self.paramSet = ParamSet(self.board, self.board.tracks)
         self.orthos = 0
@@ -296,10 +320,11 @@ class EventSetBuilder:
     def plotBoard(self):
         """
         Generate a plot of the current board configuration.
-        
+
         This creates a visual representation of the board with all tracks and events.
+        Delegates to `self.plotter` (see event_set_plotter.py).
         """
-        self.plot_coordinates_and_vectors()
+        self.plotter.plot_board(self)
 
     def retrieveOrGenerateBenchmarkMoves(self):
         """
@@ -348,33 +373,12 @@ class EventSetBuilder:
         # self.benchmarkMoves_df.set_index(['Track_ID', 'Trial', 'MoveNum'], inplace=True)
         # self.benchmarkMoves_df.sort_index(inplace=True)
 
-        # Initialize a dictionary to hold the lists per Track_ID
-        track_dict = defaultdict(list)
-
-        # Group the DataFrame by Track_ID and Trial
-        grouped = self.benchmarkMoves_df.groupby(['Track_ID', 'Trial'])
-
-        # Iterate over each group
-        for (track_id, trial), group in grouped:
-            # Create a list of MoveNums with MoveVal stored
-            moves_list = [(row['MoveNum'], row['MoveVal']) for _, row in group.iterrows()]
-
-            # Sort moves_list by MoveNum
-            moves_list.sort(key=lambda x: x[0])
-
-            # Store only MoveVal in the correct order of MoveNum
-            trial_list = [move_val for _, move_val in moves_list]
-
-            # Append the trial_list to the corresponding Track_ID
-            track_dict[track_id].append(trial_list)
-
-        # Convert defaultdict to regular dict for easier access
-        self.track_dict = dict(track_dict)
-
-        # Convert each trial's list to just MoveVal list
-        for track_id in self.track_dict:
-            for i in range(len(self.track_dict[track_id])):
-                self.track_dict[track_id][i] = [val for val in self.track_dict[track_id][i]]
+        # DataFrame -> {track_id: [[move_val, ...], ...]} hydration is a
+        # pure function of the DataFrame (see
+        # test_event_curve_math.py::test_build_track_dict_from_benchmark_moves_df),
+        # split out to event_curve_math.py in the Phase 4 decomposition
+        # follow-up.
+        self.track_dict = event_curve_math.build_track_dict_from_benchmark_moves_df(self.benchmarkMoves_df)
         end_time = time.time()
         self.benchmarkSetupTime += end_time - start_time
 
@@ -420,43 +424,39 @@ class EventSetBuilder:
     def boundingBoxPlusVector(self, vector):
         """
         Create a bounding box around a vector with additional space.
-        
+
         Args:
             vector: A tuple of two points defining the vector.
-            
+
         Returns:
             A tuple containing the original vector and the four sides of the bounding box.
+
+        Delegates to event_curve_math.bounding_box_plus_vector (this
+        method's own job is just supplying the possibleEvents-derived
+        ortho_dxdy that the pure function needs).
         """
-        intersects = [vector]
-        corners = self.orthoBoundingBox(vector)
-        for i in range(0, 4):
-            intersects.append((corners[i], corners[(i + 1) % 4]))
-        return tuple(intersects)
+        ortho_dxdy = self.possibleEvents.orthogonal_vector(vector[0], vector[1], self.config.eventminspacing / 2.0, False)
+        return event_curve_math.bounding_box_plus_vector(vector, ortho_dxdy)
 
     def orthoBoundingBox(self, vector):
         """
         Create an orthogonal bounding box around a vector.
-        
+
         Args:
             vector: A tuple of two points defining the vector.
-            
+
         Returns:
             A tuple of four points defining the corners of the bounding box.
+
+        Delegates to event_curve_math.ortho_bounding_box.
         """
         ortho_dxdy = self.possibleEvents.orthogonal_vector(vector[0], vector[1], self.config.eventminspacing / 2.0, False)
-        revOrtho_dxdy = [(-1) * d for d in ortho_dxdy]
-        corners = []
-        for o in [ortho_dxdy, revOrtho_dxdy]:
-            for v in vector:
-                corners.append(tuple([c + co for c, co in zip(v, o)]))
-        # NOTE: we zigzagged in teh nested iterators, unzigging here
-        corners = [corners[0], corners[1], corners[3], corners[2]]
-        return tuple(corners)
+        return event_curve_math.ortho_bounding_box(vector, ortho_dxdy)
 
     def getNormLengthDistCurve(self):
         """
         Get the normalized length distribution curve.
-        
+
         Returns:
             List of (x, y) points representing the normalized length distribution curve.
         """
@@ -465,7 +465,7 @@ class EventSetBuilder:
     def getNormLengthOverTimeCurve(self):
         """
         Get the normalized length over time curve.
-        
+
         Returns:
             List of (x, y) points representing the length over time curve.
         """
@@ -474,7 +474,7 @@ class EventSetBuilder:
     def getEnergyCurve(self):
         """
         Get the energy curve for event placement.
-        
+
         Returns:
             Tuple containing the energy curve and its normalized integral.
         """
@@ -489,169 +489,34 @@ class EventSetBuilder:
 
     def getNormalizedIdealCurve(self, curveFile):
         """
-        Load and normalize a curve from an SVG file.
-        
-        Args:
-            curveFile: Path to the SVG file containing the curve.
-            
-        Returns:
-            List of normalized (x, y) coordinates representing the curve.
+        Load and normalize a curve from an SVG file. Delegates to
+        event_curve_math.get_normalized_ideal_curve.
         """
-        rawCurve = np.array(bse.svgParserHoles(curveFile, returnRawCoords=True))
-        # Extract all x and y values
-        x_values = [coord[0] for coord in rawCurve]
-        y_values = [coord[1] for coord in rawCurve]
-
-        # Find the min & maximum x and y values
-        min_x = min(x_values)
-        min_y = min(y_values)
-        max_x = max(x_values)
-        max_y = max(y_values)
-        scale_x = max_x - min_x
-        scale_y = max_y - min_y
-
-        # Normalize the coordinates
-        normCurve = [((x - min_x) / scale_x, (y - min_y) / scale_y) for x, y in rawCurve]
-        normCurve.sort(key=lambda e: e[0])
-
-        return normCurve
+        return event_curve_math.get_normalized_ideal_curve(curveFile)
 
     def integrateAndNormalizeCurve(self, curve, normalizer):
-        """
-        Integrate and normalize a curve.
-        
-        Args:
-            curve: List of (x, y) points representing the curve.
-            normalizer: Value to normalize the y-values by.
-            
-        Returns:
-            Integrated and normalized curve as a list of (x, y) points.
-        """
-        integrated_curve = []
-        for i in range(0, len(curve)):
-            normx = curve[i][0]
-            if i == 0:
-                normy = curve[i][1] / normalizer
-            else:
-                normy = integrated_curve[i - 1][1] + curve[i][1] / normalizer
-            integrated_curve.append((normx, normy))
-
-        return integrated_curve
+        """Integrate and normalize a curve. Delegates to event_curve_math."""
+        return event_curve_math.integrate_and_normalize_curve(curve, normalizer)
 
     def normalizeCurveMagnitude(self, curve):
-        """
-        Normalize the magnitude of a curve.
-        
-        Args:
-            curve: List of (x, y) points representing the curve.
-            
-        Returns:
-            Curve with y-values normalized to the range [-1, 1].
-        """
-        normalizer = max(abs(max([c[1] for c in curve])), abs(min([c[1] for c in curve])))
-        if normalizer > 0:
-            normalized_curve = []
-            for i in range(0, len(curve)):
-                normy = curve[i][1] / normalizer
-                normalized_curve.append((curve[i][0], normy))
-
-            return normalized_curve
-        return curve
+        """Normalize the magnitude of a curve. Delegates to event_curve_math."""
+        return event_curve_math.normalize_curve_magnitude(curve)
 
     def actualizeCurve(self, curve, x_actualizer, y_actualizer, integrate=False):
-        """
-        Scale a curve by given x and y factors, with optional integration.
-        
-        Args:
-            curve: List of (x, y) points representing the curve.
-            x_actualizer: Scaling factor for x-values.
-            y_actualizer: Scaling factor for y-values.
-            integrate: If True, accumulate y-values during scaling.
-            
-        Returns:
-            Scaled curve as a list of (x, y) points.
-        """
-        actualized_curve = []
-        for i in range(0, len(curve)):
-            actx = curve[i][0] * x_actualizer
-            if integrate and i > 0:
-                acty = (curve[i - 1][1] + curve[i][1]) * y_actualizer
-            else:
-                acty = curve[i][1] * y_actualizer
-            actualized_curve.append((actx, acty))
-
-        return actualized_curve
+        """Scale a curve by given x and y factors. Delegates to event_curve_math."""
+        return event_curve_math.actualize_curve(curve, x_actualizer, y_actualizer, integrate)
 
     def discretizeCurve(self, curve, numBuckets, accumulate=False):
-        """
-        Convert a continuous curve into discrete buckets.
-        
-        Args:
-            curve: List of (x, y) points representing the curve.
-            numBuckets: Number of discrete buckets to create.
-            accumulate: If True, accumulate y-values in each bucket.
-            
-        Returns:
-            Discretized curve as a list of (bucket, value) pairs.
-        """
-        # If accumulating, NORMALIZE AFTER!!!
-        discretized_curve = []
-        curveIdx = 0
-        discFactor = len(curve) / numBuckets
-        for i in range(0, numBuckets):
-            discx = i + 1
-            accum_y = 0.0
-            while curveIdx < len(curve) - 1 and curveIdx < i * discFactor:
-                if accumulate:
-                    accum_y += curve[curveIdx][1]
-                curveIdx += 1
-            if accumulate:
-                if i == 0:
-                    discy = accum_y
-                else:
-                    discy = 0.7 * accum_y + 0.3 * discretized_curve[i - 1][1]
-            else:
-                discy = curve[curveIdx][1]
-            discretized_curve.append((discx, discy))
-
-        return discretized_curve
+        """Convert a continuous curve into discrete buckets. Delegates to event_curve_math."""
+        return event_curve_math.discretize_curve(curve, numBuckets, accumulate)
 
     def getPointsInProximity(self, searchRange, searchPoints, inputPoint):
-        """
-        Find points within a specified range of an input point.
-        
-        Args:
-            searchRange: Tuple of (min, max) distances to search within.
-            searchPoints: List of points to search through.
-            inputPoint: The reference point for distance calculations.
-            
-        Returns:
-            List of dictionaries containing points and their distances from the input point.
-        """
-        # NOTE: searchPoints MUST BE SORTED!!
-        pointPairs = []
-        for p in searchPoints:
-            if searchRange[0] <= (inputPoint - p) <= searchRange[1]:
-                pointPairs.append(dict(point=p, disp=inputPoint - p))
-
-        return pointPairs
+        """Find points within a range of an input point. Delegates to event_curve_math."""
+        return event_curve_math.get_points_in_proximity(searchRange, searchPoints, inputPoint)
 
     def tryGetDispAllowance(self, dispAllowances, proxPoint):
-        """
-        Try to get displacement allowance for a given proximity point.
-        
-        Args:
-            dispAllowances: List of displacement allowances.
-            proxPoint: Dictionary containing displacement information.
-            
-        Returns:
-            Dictionary with effect and modification values if found, or default values.
-        """
-        allowance = next((allow for allow in dispAllowances
-                          if allow['scalardisp'] == abs(proxPoint['disp'])), None)
-        if allowance is not None:
-            return dict(effect=allowance['isallowed'], mod=allowance['mod'])
-        return dict(effect=False, mod=0)
+        """Look up a displacement allowance. Delegates to event_curve_math."""
+        return event_curve_math.try_get_disp_allowance(dispAllowances, proxPoint)
 
     def getEffectorsForDisps(self, basePoint, searchDisps, posEffectors, eventNodes, events=None, selfScaleLength=-1):
         """
@@ -1308,17 +1173,9 @@ class EventSetBuilder:
     def searchOrderedListForVal(self, orderedList, val):
         """
         Search for a value in a sorted list using binary search.
-        
-        Args:
-            orderedList: Sorted list to search in.
-            val: Value to search for.
-            
-        Returns:
-            Index of the value if found, -1 otherwise.
+        Delegates to event_curve_math.search_ordered_list_for_val.
         """
-        idx = bsc.bisect_left(orderedList, val)
-        if idx < len(orderedList) and orderedList[idx] == val: return idx
-        return -1
+        return event_curve_math.search_ordered_list_for_val(orderedList, val)
 
     def testInterceptLegality(self, curEvent, allVectorsTest, baseVectorsTest, t):
         """
@@ -1467,31 +1324,10 @@ class EventSetBuilder:
     def indexStartOfEachHoleInCands(self, holes, trackEventOverview):
         """
         Creates a lookup table mapping hole numbers to their starting indices in the candidate events list.
-        
-        This method builds an index that allows for efficient lookup of where events for each hole
-        begin in the candidate events list, which is used to speed up event selection during board generation.
-        
-        Args:
-            holes: List of hole objects on the track.
-            trackEventOverview: List of all candidate events for the track, sorted by hole number.
-            
-        Note:
-            Modifies the trackEventOverview dictionary in-place to add a 'candeventstartlookup' key
-            containing the index mapping.
+        Delegates to event_curve_math.index_start_of_each_hole_in_cands
+        (which, like this method, mutates trackEventOverview in place).
         """
-        candEventCursor = 0
-        candEventCursorStartLookups = [-1] * len(holes)
-
-        for h in holes:
-            while trackEventOverview[candEventCursor]['eventtop'] < h.num:
-                candEventCursor += 1
-                if candEventCursor >= len(trackEventOverview): break
-            if candEventCursor >= len(trackEventOverview): break
-
-            if trackEventOverview[candEventCursor]['eventtop'] == h.num:
-                candEventCursorStartLookups[h.num - 1] = candEventCursor
-
-        trackEventOverview['candeventstartlookup'] = candEventCursorStartLookups
+        event_curve_math.index_start_of_each_hole_in_cands(holes, trackEventOverview)
 
     def updateVectorsTest(self, allVectorsTest, baseVectorsTest, event, removal, isOrtho):
         """
@@ -1574,29 +1410,10 @@ class EventSetBuilder:
     def recalcTrackCompletionPcts(self, trackEventsOverview):
         """
         Recalculates completion percentages and stall status for all tracks.
-        
-        This method updates the completion statistics for each track, including:
-        - Whether the track is stalled (no progress made in recent iterations)
-        - The percentage of holes processed
-        - The percentage of target events placed
-        
-        Args:
-            trackEventsOverview: List of dictionaries containing track event data.
-            
-        Returns:
-            tuple: A tuple containing:
-                - Average hole completion percentage across all viable tracks
-                - Average chute completion percentage across all viable tracks
+        Delegates to event_curve_math.recalc_track_completion_pcts,
+        passing self.config.maxitertrackstalled as the stall threshold.
         """
-        for t in trackEventsOverview:
-            t['trackisstalled'] = t['trackstalledcounter'] > self.config.maxitertrackstalled
-            t['holescompletepct'] = t['curhole'] / len(t['track'].trackholes)
-            t['chutescompletepct'] = len(t['eventsetbuild']) / t['optevents']
-        viableTracks = [e for e in trackEventsOverview if not e['trackisstalled']]
-
-        avgHolePct = sum([t['holescompletepct'] for t in viableTracks]) / len(viableTracks)
-        avgChutesPct = sum([t['chutescompletepct'] for t in viableTracks]) / len(viableTracks)
-        return avgHolePct, avgChutesPct
+        return event_curve_math.recalc_track_completion_pcts(trackEventsOverview, self.config.maxitertrackstalled)
 
     def tryEventSet(self, params, prevEffLengths):
         """
@@ -1978,39 +1795,9 @@ class EventSetBuilder:
     def testPlotVectorsOnHoles(self, vectors):
         """
         Creates a visualization of vectors overlaid on the board's hole positions.
-        
-        This method is primarily used for debugging and visualization purposes to see how
-        vectors (representing potential events) interact with the board's hole positions.
-        
-        Args:
-            vectors: List of vectors to plot, where each vector is a tuple of two points (start, end).
-            
-        Note:
-            Displays an interactive plot using matplotlib. The plot includes:
-            - Hole positions as points
-            - Track numbers and hole numbers as labels
-            - The input vectors as lines
+        Delegates to self.plotter (see event_set_plotter.py).
         """
-        plt.figure(figsize=(15, 10))
-        for vector in vectors:
-            x_values = [vector[0][0], vector[1][0]]
-            y_values = [vector[0][1], vector[1][1]]
-            plt.plot(x_values, y_values)
-
-        for t in self.board.tracks:
-            coordinates = [h.coords for h in t.trackholes]
-            x_coords, y_coords = zip(*coordinates)
-            plt.scatter(x_coords, y_coords, marker='o')
-
-        # Add labels
-        for t in self.board.tracks:
-            plt.annotate(str(t.Track_ID), t.trackholes[0].coords)
-            for c in t.trackholes:
-                if c.num % 5 == 0:
-                    plt.annotate(str(c.num), c.coords)
-
-        plt.show()
-        plt.waitforbuttonpress()
+        self.plotter.test_plot_vectors_on_holes(self, vectors)
 
     def buildSetIntoEvents(self):
         """
@@ -2068,602 +1855,9 @@ class EventSetBuilder:
     def plot_coordinates_and_vectors(self, bitmap_name='output_bitmap.png'):
         """
         Plots multiple sets of coordinates and vectors, and saves the plot as a bitmap image.
+        Delegates to self.plotter (see event_set_plotter.py).
 
-        Parameters:
-            coordinate_sets (list of lists): A list where each element is a list of coordinates (x, y) to be plotted.
-            vector_sets (list of lists): A list where each element is a list of vectors ((x1, y1), (x2, y2)) to be plotted.
+        Args:
             bitmap_name (str): The name of the output bitmap file.
         """
-
-        plt.figure(figsize=(20, 20))
-        coordinate_sets = []
-        path_dot_vectors = []
-        vector_sets = []
-        x_marks = []
-        for t in self.board.tracks:
-            holes = [h.coords for h in t.trackholes]
-            coordinate_sets.append(holes)
-            for c_idx in range(len(holes) - 1):
-                path_dot_vectors.append((holes[c_idx], holes[c_idx + 1]))
-            trackVectorSet = []
-            for l, ch in zip([True, True, False], [True, False, True]):
-                trackVectorSubset = []
-                trackVectorSubset.extend([c.crowVector for c in t.chutes if not c.eventDete.isOrtho
-                                          and c.eventDete.instanceIsLadder == l and c.eventDete.instanceIsChute == ch])
-                trackVectorSubset.extend([c.eventDete.instanceStartVector for c in t.chutes if c.eventDete.isOrtho
-                                          and c.eventDete.instanceIsLadder == l and c.eventDete.instanceIsChute == ch])
-                trackVectorSubset.extend([c.eventDete.instanceEndVector for c in t.chutes if c.eventDete.isOrtho
-                                          and c.eventDete.instanceIsLadder == l and c.eventDete.instanceIsChute == ch])
-                trackVectorSet.append(trackVectorSubset)
-
-                if l and not ch:
-                    x_marks.extend([c.crowVector[1] for c in t.chutes if not c.eventDete.isOrtho
-                                    and c.eventDete.instanceIsLadder == l and c.eventDete.instanceIsChute == ch])
-                    x_marks.extend([c.eventDete.instanceEndVector[0] for c in t.chutes if c.eventDete.isOrtho
-                                    and c.eventDete.instanceIsLadder == l and c.eventDete.instanceIsChute == ch])
-                elif ch and not l:
-                    x_marks.extend([c.crowVector[0] for c in t.chutes if not c.eventDete.isOrtho
-                                    and c.eventDete.instanceIsLadder == l and c.eventDete.instanceIsChute == ch])
-                    x_marks.extend([c.eventDete.instanceStartVector[0] for c in t.chutes if c.eventDete.isOrtho
-                                    and c.eventDete.instanceIsLadder == l and c.eventDete.instanceIsChute == ch])
-
-            vector_sets.append(trackVectorSet)
-
-        # Plot each set of coordinates
-        for coordinates in coordinate_sets:
-            x_coords, y_coords = zip(*coordinates)
-            plt.scatter(x_coords, y_coords, marker='o')
-
-        # Plot tracks in fine dots
-        for vector in path_dot_vectors:
-            x_values = [vector[0][0], vector[1][0]]
-            y_values = [vector[0][1], vector[1][1]]
-            plt.plot(x_values, y_values, linestyle=':', color='black', linewidth=1)
-
-        # Plot lumps for cannot enter
-        lumps = []
-        lumps.extend([tuple(c.eventDete.instanceLump) for c in [c for t in self.board.tracks for c in t.chutes]
-                      if c.eventDete.instanceLump != (-1, -1)])
-        lumps.extend([tuple(l.eventDete.instanceLump) for l in [l for t in self.board.tracks for l in t.ladders]
-                      if l.eventDete.instanceLump != (-1, -1)])
-        for coordinates in lumps:
-            x_coords, y_coords = coordinates[0], coordinates[1]
-            plt.scatter(x_coords, y_coords, marker="s")
-
-        # Add labels
-        for t in self.board.tracks:
-            plt.annotate(str(t.Track_ID), t.trackholes[0].coords)
-            for c in t.trackholes:
-                if c.num % 5 == 0:
-                    plt.annotate(str(c.num), c.coords)
-
-        # Plot each set of vectors
-        colourCounter = 0
-        colours = [(.5, 0, 0), (1, 0.5, 0), (1, 0, 0.5),
-                   (0, .5, 0), (0.5, 1, 0), (0, 1, 0.5),
-                   (0, 0, .5), (0, 0.5, 1), (0.5, 0, 1)]
-        for vector_subset in vector_sets:
-            for vectors in vector_subset:
-                for vector in vectors:
-                    x_values = [vector[0][0], vector[1][0]]
-                    y_values = [vector[0][1], vector[1][1]]
-                    plt.plot(x_values, y_values, color=colours[colourCounter])  # 'r-' means red line
-                colourCounter += 1
-
-        # Ploy x's on vectors for ladders-only & chutes-onlly
-        # for c in x_marks:
-        #     plt.annotate("x", c, fontsize=18)
-
-        # Set the axes' limits to fit all points and vectors nicely
-        all_x = [coord[0] for coordinates in coordinate_sets for coord in coordinates]
-        all_y = [coord[1] for coordinates in coordinate_sets for coord in coordinates]
-        plt.xlim([min(all_x) - 1, max(all_x) + 1])
-        plt.ylim([min(all_y) - 1, max(all_y) + 1])
-
-        # Save the plot as a bitmap image
-        plt.savefig(bitmap_name, format='png')
-        plt.show()
-        plt.waitforbuttonpress()
-        # plt.close()
-
-
-class OrthoPath:
-    """
-    Represents an orthogonal path between points on the game board.
-
-    Used for generating and managing orthogonal event paths such as ladders and chutes.
-
-    Attributes:
-        start: Starting coordinates of the path.
-        mid: Midpoint coordinates of the path.
-        end: Ending coordinates of the path.
-        incr: Increment value for path generation.
-        rev: Boolean indicating if the path is reversed.
-        event: The event associated with this path.
-    """
-
-    def __init__(self, start, mid, end, incr, rev, event):
-        """
-        Initialize an OrthoPath with start, middle, and end points.
-
-        Args:
-            start: Starting coordinates (x, y) of the path.
-            mid: Midpoint coordinates (x, y) of the path.
-            end: Ending coordinates (x, y) of the path.
-            incr: Increment value used in path generation.
-            rev: Boolean indicating if the path is reversed.
-            event: The event object associated with this path.
-        """
-        self.start = start
-        self.mid = mid
-        self.end = end
-
-        self.incr = incr
-        self.rev = rev
-        self.event = event
-
-
-class OrthoLineTrace:
-    """
-    Represents a trace line for orthogonal event placement.
-
-    Used to calculate and validate the placement of orthogonal events
-    such as ladders and chutes on the game board.
-
-    Attributes:
-        event: The event this trace is associated with.
-        incr: Increment value for trace generation.
-        rev: Boolean indicating if the trace is reversed.
-        type: Type of the orthogonal line trace.
-        vector: Tuple of coordinate pairs representing the trace vector.
-    """
-
-    def __init__(self, possibleEvents, event, incr, rev, type):
-        """
-        Initialize an OrthoLineTrace for an event.
-
-        Args:
-            possibleEvents: Collection of possible events.
-            event: The event to create a trace for.
-            incr: Increment value for trace generation.
-            rev: Boolean indicating if the trace is reversed.
-            type: Type of the orthogonal line trace (START or END).
-        """
-        self.event = event
-        self.incr = incr
-        self.rev = rev
-        self.type = type
-        self.vector = ((-1, -1), (-1, -1))
-
-        p1, p2 = (-1, -1), (-1, -1)
-        midpoint = tuple([sum(c) / 2 for c in zip(self.event.startHole.coords, self.event.endHole.coords)])
-        orthogonal_vector = tuple([(-1 if rev else 1) * o for o in self.event.orthoVector])
-        orthogonal_vector = possibleEvents.orthogonal_vector(self.event.startHole.coords, self.event.endHole.coords,
-                                                             possibleEvents.config.maxloopyorthoeventdisplacementincrements
-                                                             * possibleEvents.config.eventminspacing, rev)
-        length_divider = incr / possibleEvents.config.maxloopyorthoeventdisplacementincrements
-        match type:
-            case en.OrthoLineTraceType.START:
-                p1 = self.event.startHole.coords
-            case en.OrthoLineTraceType.END:
-                p1 = self.event.endHole.coords
-            case _:
-                raise Exception("No ortho line trace type specified!")
-
-        p2 = (midpoint[0] + orthogonal_vector[0] * length_divider,
-              midpoint[1] + orthogonal_vector[1] * length_divider)
-
-        self.vector = (p1, p2)
-
-    def __key(self):
-        return (self.event, self.rev, self.incr)
-
-    # NOTE: do not put objects of multiple types in a set!!!
-
-    def __hash__(self):
-        return hash(self.__key())
-
-    def __eq__(self, other):
-        if isinstance(other, OrthoLineTrace):
-            return self.__key() == other.__key()
-        return NotImplemented
-
-    def __lt__(self, other):
-        # Define the comparison order
-        if self.event != other.event:
-            return self.event < other.event
-        if self.rev != other.rev:
-            return self.rev < other.rev
-        return self.incr < other.incr
-
-
-class ParamSet:
-    """
-    Manages parameters for event set generation and optimization.
-
-    This class handles the configuration and optimization of various parameters
-    that control how events are generated and placed on the game board.
-
-    Attributes:
-        board: Reference to the game board.
-        tracks: List of tracks on the game board.
-        params: List of parameter configurations.
-    """
-
-    def __init__(self, board, tracks):
-        """
-        Initialize the ParamSet with board and tracks.
-
-        Args:
-            board: The game board object.
-            tracks: List of tracks on the game board.
-        """
-        # HOLE AND LENGTH BASED INTS:
-        # baseopteventspertrack
-        # ladderscanstartat
-        # baseoptfirstchute
-        # RELATIVE
-        # candenergyskewdiminisher - Divides skew by this amount, maintain convergence
-        # maxchuteoverdrivepct
-        # holescompletetrackallowablecutoff
-        # lengthhistogramscoringfactor
-        # eventspacingdeviationfactor - Higher means more deviation in event spacing
-        # eventspacinghistogramscoringfactor - Lower means less weight put upon it, MAX around 0.4 or 0.5!
-        # candenergybufferdivider
-        # move1allowanceratio INACTIVE
-        # lengthhistogramscoringfactor - Lower means less weight put upon it
-        # lengthovertimescoringfactor - Lower means less weight put upon it
-        # disallowbelowsetlength - HELLA override! track spec only probs
-        # maxorthoratio
-        # minladdertochuteratio
-        # minchutetoladderratio
-        # twohitfreqimpedance - higher means more slowing of two-hit event combos
-        self.board = board
-        self.tracks = tracks
-        self.params = []
-
-    def intakeParams(self, instanceParams_df):
-        """
-        Load parameters from a DataFrame.
-
-        Args:
-            instanceParams_df: DataFrame containing parameter configurations.
-        """
-        self.params = []
-        # Cursor thru params setting as needed
-        for index, param_sr in instanceParams_df.iterrows():
-            # Prioritize track override if exists
-            self.params.append(dict(track_id=param_sr['track_id'], param=param_sr['param'], value=param_sr['value']))
-
-    def intakeParamsFromDb(self, optimizerRunSet, optimizerRun):
-        """
-        Load parameters from the database.
-
-        Args:
-            optimizerRunSet: Identifier for the optimizer run set.
-            optimizerRun: Identifier for the specific optimizer run.
-        """
-        with contextlib.closing(sql.connect(self.board.config.optimizer_db_path)) as sqlConn:
-            with sqlConn:
-                self.params = []
-                paramsQuery_sb = StringIO()
-                paramsQuery_sb.write("SELECT p.*")
-                paramsQuery_sb.write(" from OptimizerRunTestParams p ")
-                paramsQuery_sb.write("inner join OptimizerRuns o ")
-                paramsQuery_sb.write("on o.OptimizerRun = p.OptimizerRun ")
-                paramsQuery_sb.write("inner join OptimizerRunSets os ")
-                paramsQuery_sb.write("on os.OptimizerRunSet = o.OptimizerRunSet ")
-                paramsQuery_sb.write("where os.OptimizerRunSet = ? ")
-                paramsQuery_sb.write("and o.OptimizerRun = ? ")
-                params_df = pd.read_sql_query(paramsQuery_sb.getvalue(), sqlConn,
-                                              params=[optimizerRunSet, optimizerRun])
-                # Cursor thru params setting as needed
-                for index, param_sr in params_df.iterrows():
-                    # Prioritize track override if exists
-                    self.params.append(dict(track_id=param_sr['Track_ID'], param=param_sr['Param'],
-                                            value=param_sr['InstanceParamValue']))
-
-    def midpointInitParams(self):
-        """
-        Initialize parameters with midpoint values for optimization.
-
-        This sets up default parameter values that are in the middle of their
-        allowed ranges to provide a good starting point for optimization.
-        """
-        with contextlib.closing(sql.connect(self.board.config.optimizer_db_path)) as sqlConn:
-            with sqlConn:
-                with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
-                    # Retrieve base values from db
-                    query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID = ? AND Active = ?"
-                    sqliteCursor.execute(query, [self.board.boardID, 0, 1])
-                    boardparamranges_df = pd.DataFrame(sqliteCursor.fetchall(),
-                                                       columns=[d[0] for d in sqliteCursor.description])
-                    if len(boardparamranges_df) == 0:
-                        raise Exception("No param bounds found for board ID {}".format(self.board.boardID))
-
-                    # Set params from ranges for board
-                    self.params = []
-                    # for index, param_sr in boardparamranges_df.iterrows():
-                    #     # Prioritize track override if exists
-                    #     if param_sr['isInt'] == 1:
-                    #         curVal = rd.randint(int(param_sr['LBound']), int(param_sr['UBound']))
-                    #     else:
-                    #         curVal = rd.uniform(param_sr['LBound'], param_sr['UBound'])
-                    #     self.params.append(dict(track_id=0, param=param_sr['Param'], value=curVal))
-
-                    for t in self.tracks:
-                        # Try to retrieve overrides if exist
-                        query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID = ? AND Active = ?"
-                        sqliteCursor.execute(query, [self.board.boardID, t.Track_ID, 1])
-                        trackparamranges_df = pd.concat([pd.DataFrame(sqliteCursor.fetchall(),
-                                                                      columns=[d[0] for d in sqliteCursor.description]),
-                                                         boardparamranges_df])
-                        trackparamranges_df.sort_values(['Param', 'Track_ID'], inplace=True,
-                                                        ascending=False)
-
-                        # Set params from ranges
-                        prevParam = ""
-                        for index, param_sr in trackparamranges_df.iterrows():
-                            # Prioritize track override if exists
-                            if param_sr['Param'] == prevParam: continue
-                            if param_sr['isInt'] == 1:
-                                curVal = (int(param_sr['LBound']) + int(param_sr['UBound'])) // 2
-                            else:
-                                curVal = (param_sr['LBound'] + param_sr['UBound']) / 2
-                            self.params.append(dict(track_id=t.Track_ID, param=param_sr['Param'], value=curVal))
-                            prevParam = param_sr['Param']
-
-    def monteCarlo(self):
-        """
-        Perform a Monte Carlo simulation to optimize parameters.
-
-        Randomly samples parameter values within their defined ranges to find
-        optimal configurations for event generation.
-        """
-        with contextlib.closing(sql.connect(self.board.config.optimizer_db_path)) as sqlConn:
-            with sqlConn:
-                with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
-                    # Retrieve base values from db
-                    query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID = ? AND Active = ?"
-                    sqliteCursor.execute(query, [self.board.boardID, 0, 1])
-                    boardparamranges_df = pd.DataFrame(sqliteCursor.fetchall(),
-                                                       columns=[d[0] for d in sqliteCursor.description])
-                    if len(boardparamranges_df) == 0:
-                        raise Exception("No param bounds found for board ID {}".format(self.board.boardID))
-
-                    # Set params from ranges for board
-                    self.params = []
-                    # for index, param_sr in boardparamranges_df.iterrows():
-                    #     # Prioritize track override if exists
-                    #     if param_sr['isInt'] == 1:
-                    #         curVal = rd.randint(int(param_sr['LBound']), int(param_sr['UBound']))
-                    #     else:
-                    #         curVal = rd.uniform(param_sr['LBound'], param_sr['UBound'])
-                    #     self.params.append(dict(track_id=0, param=param_sr['Param'], value=curVal))
-
-                    for t in self.tracks:
-                        # Try to retrieve overrides if exist
-                        query = "SELECT * FROM BoardTrackHints WHERE Board_ID = ? AND Track_ID = ? AND Active = ?"
-                        sqliteCursor.execute(query, [self.board.boardID, t.Track_ID, 1])
-                        trackparamranges_df = pd.concat([pd.DataFrame(sqliteCursor.fetchall(),
-                                                                      columns=[d[0] for d in sqliteCursor.description]),
-                                                         boardparamranges_df])
-                        trackparamranges_df.sort_values(['Param', 'Track_ID'], inplace=True,
-                                                        ascending=False)
-
-                        # Set params from ranges
-                        prevParam = ""
-                        for index, param_sr in trackparamranges_df.iterrows():
-                            # Prioritize track override if exists
-                            if param_sr['Param'] == prevParam: continue
-                            if param_sr['isInt'] == 1:
-                                curVal = rd.randint(int(param_sr['LBound']), int(param_sr['UBound']))
-                            else:
-                                curVal = rd.uniform(param_sr['LBound'], param_sr['UBound'])
-                            self.params.append(dict(track_id=t.Track_ID, param=param_sr['Param'], value=curVal))
-                            prevParam = param_sr['Param']
-
-    def tempInsertParamsDb(self, optimizerRunSet, optimizerRun):
-        """
-        Temporarily store parameters in the database.
-
-        Args:
-            optimizerRunSet: Identifier for the optimizer run set.
-            optimizerRun: Identifier for the specific optimizer run.
-        """
-        with contextlib.closing(sql.connect(self.board.config.optimizer_db_path)) as sqlConn:
-            with sqlConn:
-                with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
-                    query = "INSERT INTO OptimizerRuns (OptimizerRunSet, OptimizerRun, Board_ID, Timestamp) VALUES (?,?,?,?)"
-                    sqliteCursor.execute(query, [optimizerRunSet, optimizerRun, self.board.boardID,
-                                                 dt.now().strftime('%m/%d/%y %H:%M:%S')])
-                    sqlConn.commit()
-
-                    params_df = pd.DataFrame.from_records(self.params)
-                    # params_df.rename(columns={"track_id": "Track_ID", "param": "Param", "value": "InstanceParamValue"})
-                    params_df['Board_ID'] = self.board.boardID
-                    params_df['OptimizerRunSet'] = optimizerRunSet
-                    params_df['OptimizerRun'] = optimizerRun
-
-                    # Insert into data table
-                    params_l = params_df.values.tolist()
-                    paramsQuery_sb = StringIO()
-                    paramsQuery_sb.write(
-                        "INSERT INTO OptimizerRunTestParams(Track_ID, Param, InstanceParamValue, Board_ID, OptimizerRunSet, OptimizerRun) values(?,?,?,?,?,?)")
-                    sqliteCursor.execute("BEGIN TRANSACTION")
-                    for index, record in params_df.iterrows():
-                        sqliteCursor.execute(paramsQuery_sb.getvalue(), [record['track_id'], record['param'],
-                                                                         record['value'], record['Board_ID'],
-                                                                         record['OptimizerRunSet'],
-                                                                         record['OptimizerRun']])
-                    sqliteCursor.execute("END TRANSACTION")
-
-                    sqlConn.commit()
-                    paramsQuery_sb.close()
-
-    def tempWriteMetricsToDb(self, evaluator):
-        """
-        Writes optimization metrics to the database for analysis and tracking.
-        
-        This method records various performance metrics from the evaluator to the optimizer database,
-        which can be used for analyzing optimization performance and debugging.
-        
-        Args:
-            evaluator: The evaluator object containing metrics to be recorded.
-            
-        Note:
-            - Connects to 'etc/Optimizer.db' SQLite database
-            - Creates necessary tables if they don't exist
-            - Records metrics in a transaction for data consistency
-        """
-        with contextlib.closing(sql.connect(self.board.config.optimizer_db_path)) as sqlConn:
-            with sqlConn:
-                with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
-
-                    # Input metric info
-                    metrics_df = pd.DataFrame.from_records(evaluator.results)
-                    metrics_df['WeightedValue'] = metrics_df['Weighting'] * metrics_df['ResultValue']
-                    metrics_df.drop(['Weighting', 'ResultValueIterative'], axis=1, inplace=True)
-                    metrics_df['OptimizerRunSet'] = evaluator.optimizerRunSet
-                    metrics_df['OptimizerRun'] = evaluator.optimizerRun
-                    metrics_df['Board_ID'] = evaluator.board.boardID
-
-                    # Insert into data table
-                    metrics_l = metrics_df.values.tolist()
-                    metricsQuery_sb = StringIO()
-                    metricsQuery_sb.write("INSERT INTO OptimizerRunResults (")
-                    cols = metrics_df.columns.values.tolist()
-                    for c in range(0, len(cols) - 1):
-                        metricsQuery_sb.write(cols[c])
-                        metricsQuery_sb.write(", ")
-                    metricsQuery_sb.write(cols[len(cols) - 1])
-                    metricsQuery_sb.write(") VALUES (")
-                    metricsQuery_sb.write(", ".join(['?'] * len(cols)))
-                    metricsQuery_sb.write(")")
-                    sqliteCursor.execute("BEGIN TRANSACTION")
-                    # sqliteCursor.execute("select * from  Testtest")
-                    for index, record in metrics_df.iterrows():
-                        sqliteCursor.execute(metricsQuery_sb.getvalue(), [record['Result'], record['ResultFlavour'],
-                                                                          record['ResultValue'],
-                                                                          record['WeightedValue'],
-                                                                          record['OptimizerRunSet'],
-                                                                          record['OptimizerRun'], record['Board_ID']])
-
-                    sqliteCursor.execute("END TRANSACTION")
-                    # sqliteCursor.executemany(metricsQuery_sb.getvalue(), metrics_df)
-                    sqlConn.commit()
-                    metricsQuery_sb.close()
-
-    def tempWriteEvents(self, stats, optimizerRunSet, optimizerRun):
-        """
-        Writes event data to the database for a specific optimization run.
-        
-        This method records the current state of events (chutes and ladders) to the database
-        for a given optimization run, allowing for tracking of how events evolve during optimization.
-        
-        Args:
-            stats: Dictionary containing statistics about the current optimization state.
-            optimizerRunSet: Identifier for the set of optimization runs.
-            optimizerRun: Specific run identifier within the set.
-            
-        Note:
-            - Records events in a transaction for data consistency
-            - Tracks both chutes and ladders with their properties
-            - Updates the database with the current best event configuration
-        """
-        with contextlib.closing(sql.connect(self.board.config.optimizer_db_path)) as sqlConn:
-            with sqlConn:
-                with contextlib.closing(sqlConn.cursor()) as sqliteCursor:
-                    # Cache events hit in db
-                    eventshit_df = pd.DataFrame.from_records(
-                        [m.to_dict() for m in stats.moves if m.ladderorchuteamt != 0])
-                    query = "INSERT INTO EventHit Values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-                    sqliteCursor.execute("BEGIN TRANSACTION")
-                    for idx, move in eventshit_df.iterrows():
-                        sqliteCursor.execute(query, (optimizerRunSet, optimizerRun, self.board.boardID,
-                                                     move['trial'], move['track_id'], move['threadnum'],
-                                                     move['movenum'],
-                                                     move['currpos'] - move['score'] + move['basescore'],
-                                                     move['currpos'],
-                                                     move['score'] - move['basescore']))
-
-                    sqliteCursor.execute("END TRANSACTION")
-                    sqlConn.commit()
-
-    def modParamsForFmin(self, paramsSubset, fminParamsList):
-        """
-        Modifies parameters for function minimization during optimization.
-        
-        This method prepares and updates parameter values for use in the optimization
-        process, converting between the optimization algorithm's format and the
-        internal parameter representation.
-        
-        Args:
-            paramsSubset: List of parameter names to be modified.
-            fminParamsList: List of parameter values from the optimization algorithm.
-            
-        Returns:
-            DataFrame: Updated parameters with new values for the specified subset.
-            
-        Note:
-            - Handles parameter scaling and transformation if needed
-            - Maintains parameter bounds and constraints
-            - Updates the internal parameter state
-        """
-        allParams_df = pd.DataFrame.from_records(self.params)
-        allParams_df.set_index(['param'], inplace=True)
-        allParams_df.sort_index(inplace=True)
-        for idx in range(0, len(paramsSubset)):
-            param_df = allParams_df.loc[fminParamsList[idx]['param']]
-            if isinstance(param_df, pd.Series): param_df = pd.DataFrame(param_df)
-            for idx2, param_sr in param_df.iterrows():
-                mask = (allParams_df.index == idx2) & (allParams_df['track_id'] == param_sr['track_id'])
-                allParams_df.loc[mask, 'value'] = paramsSubset[idx]
-
-        # Cursor thru params setting as needed
-        self.params = []
-        for index, param_sr in allParams_df.iterrows():
-            # Prioritize track override if exists
-            self.params.append(
-                dict(track_id=param_sr['track_id'], param=index, value=param_sr['value']))
-
-    def tryGetParam(self, track_ID, paramName, optional=False):
-        """
-        Retrieve a parameter value by track ID and parameter name.
-
-        Args:
-            track_ID: ID of the track to get the parameter for.
-            paramName: Name of the parameter to retrieve.
-            optional: If True, returns None if parameter not found instead of raising an error.
-
-        Returns:
-            The parameter value if found, None if optional and not found.
-
-        Raises:
-            Exception: If parameter is not found and optional is False.
-        """
-        record = next((param for param in self.params if param['param'] == paramName and
-                       param['track_id'] == track_ID), None)
-        if record is None:
-            if optional: return 0
-            raise Exception("{} not found for track_ID {}".format(paramName, track_ID))
-
-        return record['value']
-
-    def tryModParam(self, track_ID, paramName, newValue):
-        """
-        Modify a parameter value.
-
-        Args:
-            track_ID: ID of the track containing the parameter.
-            paramName: Name of the parameter to modify.
-            newValue: New value to set for the parameter.
-
-        Returns:
-            bool: True if parameter was found and modified, False otherwise.
-        """
-        # Iterate through the list of dictionaries
-        for record in self.params:
-            if record['track_id'] == track_ID and record['param'] == paramName:
-                record['value'] = newValue
-                break  # Exit the loop once the record is found and modified
+        self.plotter.plot_coordinates_and_vectors(self, bitmap_name)
