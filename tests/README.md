@@ -461,6 +461,43 @@ extensions). `pytest -m integration` is the rest.
   unchanged; `test_recalc_track_completion_pcts_averages_over_viable_
   tracks` and the new `_build_track_state` test both updated to build
   `TrackBuildState` instances instead of dicts.
+- Refactor Mk II Phase 8 step 3, done: `scoreEventsForHole`'s two-hit
+  detection was four ~25-line near-duplicate blocks (ladder-instance
+  forward/backward, chute-instance forward/backward), each scanning a
+  "same event type as the one being placed" position list and an
+  "opposite type" one, with subtly different net-length formulas and
+  guard flags per block. Collapsed into one shared
+  `_scan_two_hits_for_direction(...)` method (defined just above
+  `scoreEventsForHole`), called four times with the position list/dict/
+  match-key/guard-flag/net-length-formula specific to each block passed
+  in explicitly -- pure code motion, every formula/flag verified by hand
+  against the original block it replaces (see the method's own
+  docstring for the full mapping).
+
+  Collapsing surfaced exactly the asymmetry the Mk II plan called out:
+  in every one of the four original blocks, a same-dir-twohits
+  rejection (`config.onlysamedirtwohits`, plus a "matched item's length
+  is within 3 of this event's length" check) only ever applied to
+  matches against the *opposite* event type from the one being placed
+  (chute matches when placing a ladder, ladder matches when placing a
+  chute) -- same-type matches were never guarded, in both directions.
+  Preserved verbatim, not fixed, since it's unclear from the code alone
+  whether that's intentional (the guard is really about mixed-type
+  two-hits) or a copy-paste gap -- documented as a TODO on
+  `_scan_two_hits_for_direction`'s docstring, with a passing
+  characterization test
+  (`test_scan_two_hits_for_direction_guards_only_the_flagged_side`) that
+  exercises the exact guarded/unguarded split. Two more
+  `_scan_two_hits_for_direction`-specific tests cover the ordinary
+  strict/loose hit counting and the "count happens before the length
+  check can still reject it" ordering. All exercise the extracted
+  method directly with small hand-built lists/dicts (needs only
+  `self.config.onlysamedirtwohits` and the already-pure
+  `searchOrderedListForVal`) rather than the full
+  `scoreEventsForHole`/`tryEventSet` machinery, which needs a much
+  larger fixture (see the Phase 8 step 1 section above) -- this was the
+  practical way to get a real, passing characterization test for this
+  specific behavior without that larger undertaking.
 
 ## Fixtures
 

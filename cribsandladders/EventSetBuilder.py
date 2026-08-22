@@ -772,6 +772,92 @@ class EventSetBuilder:
             self.miniMarkovTime += (end_time - start_time)
             return forecastedTrackEffLengthHoles, None
 
+    def _scan_two_hits_for_direction(self, ref_hole_num, p_values,
+                                     primary_positions, primary_items, primary_match_key,
+                                     primary_guarded, primary_net_length_fn,
+                                     secondary_positions, secondary_items, secondary_match_key,
+                                     secondary_guarded, secondary_net_length_fn,
+                                     event_length):
+        """
+        Scans one direction (forward or backward, `p_values` is (1, 2, 4)
+        or (-1, -2, -4)) of scoreEventsForHole's two-hit detection for
+        both event types (a "primary" position list/items -- e.g.
+        ladders when checking a ladder instance -- and a "secondary" one
+        -- e.g. chutes). Phase 8 step 3 extraction (see [[Refactor Mk
+        ii]] in the Obsidian vault): this is the one shape duplicated
+        four times in the original inline code (ladder-instance forward/
+        backward, chute-instance forward/backward), each time checking a
+        "same event type as the one being placed" list and an "opposite
+        type" list.
+
+        `primary_guarded`/`secondary_guarded` control whether
+        `config.onlysamedirtwohits` and the "matched item's length is
+        within 3 of this event's length" rule can reject the candidate
+        outright for that position list's matches. TODO(liam): in the
+        original inline code (verbatim preserved here, not changed),
+        these guards were applied inconsistently depending on which
+        *event type* was being matched, not on direction: matches
+        against the *same* type as the instance being placed (ladder
+        matches when placing a ladder, chute matches when placing a
+        chute) were never guarded, while matches against the *opposite*
+        type (chute matches when placing a ladder, and vice versa) always
+        were, in both directions. Whether that's intentional design (the
+        guard is really about mixed-type two-hits specifically) or a
+        copy-paste asymmetry that should apply uniformly is unclear from
+        the code/comments alone -- see
+        tests/test_eventsetbuilder.py::test_scan_two_hits_for_direction_guards_only_the_flagged_side
+        for the passing characterization of this exact behavior.
+
+        For each `p` in `p_values`, checks `primary_positions` (an
+        ordered list, searched via `self.searchOrderedListForVal`) for
+        `ref_hole_num + p`; on a match, either counts it as "loose"
+        (`abs(p) == 4`) or as a strict two-hit, then looks up the
+        matching item in `primary_items` by `primary_match_key` to
+        compute a net length delta via `primary_net_length_fn(event_length,
+        matched_item_length)`. Then does the same for
+        `secondary_positions`/`secondary_items`/`secondary_match_key`/
+        `secondary_net_length_fn`. Matches original control flow exactly:
+        a guarded rejection stops scanning further `p` values immediately
+        (mirrors the original's `break` out of the `for p` loop) --
+        anything already counted for earlier `p` values in this call is
+        still returned, since the caller treats `invalid=True` as
+        "reject this whole candidate" regardless.
+
+        Returns:
+            tuple: (num_two_hits, num_two_hits_loose, net_lengths, invalid)
+        """
+        num_two_hits = 0
+        num_two_hits_loose = 0
+        net_lengths = []
+        for p in p_values:
+            if self.searchOrderedListForVal(primary_positions, ref_hole_num + p) > -1:
+                if abs(p) == 4:
+                    num_two_hits_loose += 1
+                else:
+                    if primary_guarded and self.config.onlysamedirtwohits:
+                        return num_two_hits, num_two_hits_loose, net_lengths, True
+                    num_two_hits += 1
+                    for item in primary_items:
+                        if item[primary_match_key] == ref_hole_num + p:
+                            if primary_guarded and abs(event_length - item['length']) < 3:
+                                return num_two_hits, num_two_hits_loose, net_lengths, True
+                            net_lengths.append(primary_net_length_fn(event_length, item['length']))
+                            break
+            if self.searchOrderedListForVal(secondary_positions, ref_hole_num + p) > -1:
+                if abs(p) == 4:
+                    num_two_hits_loose += 1
+                else:
+                    if secondary_guarded and self.config.onlysamedirtwohits:
+                        return num_two_hits, num_two_hits_loose, net_lengths, True
+                    num_two_hits += 1
+                    for item in secondary_items:
+                        if item[secondary_match_key] == ref_hole_num + p:
+                            if secondary_guarded and abs(event_length - item['length']) < 3:
+                                return num_two_hits, num_two_hits_loose, net_lengths, True
+                            net_lengths.append(secondary_net_length_fn(event_length, item['length']))
+                            break
+        return num_two_hits, num_two_hits_loose, net_lengths, False
+
     def scoreEventsForHole(self, t, hole,
                            chutes, chuteBases, chuteTops, ladders, ladderBases, ladderTops, params, trackEventsOverview,
                            explicitEvent=None, explicitChute=False, explicitLadder=False):
@@ -1039,112 +1125,54 @@ class EventSetBuilder:
                 #     return 0
 
                 if instType in (en.InstanceEventType.LADDERONLY, en.InstanceEventType.CHUTEANDLADDER):
-                    for p in (1, 2, 4):
-                        if self.searchOrderedListForVal(ladderBases, candEventSpecs['event'].endHole.num + p) > -1:
-                            if abs(p) == 4:
-                                numTwoHitsLoose += 1
-                            else:
-                                numTwoHits += 1
-                                for l in ladders:
-                                    if l['ladderbase'] == candEventSpecs['event'].endHole.num + p:
-                                        twoHitNetLengths.append(l['length'] + candEventSpecs['event'].length)
-                                        break
-                        if self.searchOrderedListForVal(chuteTops, candEventSpecs['event'].endHole.num + p) > -1:
-                            if abs(p) == 4:
-                                numTwoHitsLoose += 1
-                            else:
-                                if self.config.onlysamedirtwohits:
-                                    twoHitInvalid = True
-                                    break
-                                numTwoHits += 1
-                                for c in chutes:
-                                    if c['chutetop'] == candEventSpecs['event'].endHole.num + p:
-                                        if abs(candEventSpecs['event'].length - c['length']) < 3:
-                                            twoHitInvalid = True
-                                            break
-                                        twoHitNetLengths.append(candEventSpecs['event'].length - c['length'])
-                                        break
+                    # Forward: same-type (ladder) matches unguarded, opposite-type
+                    # (chute) matches guarded -- see _scan_two_hits_for_direction's
+                    # docstring for the TODO on this asymmetry.
+                    deltaHits, deltaLoose, deltaLengths, invalid = self._scan_two_hits_for_direction(
+                        candEventSpecs['event'].endHole.num, (1, 2, 4),
+                        ladderBases, ladders, 'ladderbase', False, lambda el, ll: ll + el,
+                        chuteTops, chutes, 'chutetop', True, lambda el, cl: el - cl,
+                        candEventSpecs['event'].length)
+                    numTwoHits += deltaHits
+                    numTwoHitsLoose += deltaLoose
+                    twoHitNetLengths.extend(deltaLengths)
+                    twoHitInvalid = twoHitInvalid or invalid
                     if twoHitInvalid: continue
-                    for p in (-1, -2, -4):
-                        if self.searchOrderedListForVal(ladderTops, candEventSpecs['event'].startHole.num + p) > -1:
-                            if abs(p) == 4:
-                                numTwoHitsLoose += 1
-                            else:
-                                numTwoHits += 1
-                                for l in ladders:
-                                    if l['laddertop'] == candEventSpecs['event'].startHole.num + p:
-                                        twoHitNetLengths.append(candEventSpecs['event'].length + l['length'])
-                                        break
-                        if self.searchOrderedListForVal(chuteBases, candEventSpecs['event'].startHole.num + p) > -1:
-                            if abs(p) == 4:
-                                numTwoHitsLoose += 1
-                            else:
-                                if self.config.onlysamedirtwohits:
-                                    twoHitInvalid = True
-                                    break
-                                numTwoHits += 1
-                                for c in chutes:
-                                    if c['chutebase'] == candEventSpecs['event'].startHole.num + p:
-                                        if abs(candEventSpecs['event'].length - c['length']) < 3:
-                                            twoHitInvalid = True
-                                            break
-                                        twoHitNetLengths.append(candEventSpecs['event'].length - c['length'])
-                                        break
+                    deltaHits, deltaLoose, deltaLengths, invalid = self._scan_two_hits_for_direction(
+                        candEventSpecs['event'].startHole.num, (-1, -2, -4),
+                        ladderTops, ladders, 'laddertop', False, lambda el, ll: el + ll,
+                        chuteBases, chutes, 'chutebase', True, lambda el, cl: el - cl,
+                        candEventSpecs['event'].length)
+                    numTwoHits += deltaHits
+                    numTwoHitsLoose += deltaLoose
+                    twoHitNetLengths.extend(deltaLengths)
+                    twoHitInvalid = twoHitInvalid or invalid
                     if twoHitInvalid: continue
 
                 if instType in (en.InstanceEventType.CHUTEONLY, en.InstanceEventType.CHUTEANDLADDER):
-                    for p in (1, 2, 4):
-                        if self.searchOrderedListForVal(ladderBases, candEventSpecs['event'].startHole.num + p) > -1:
-                            if abs(p) == 4:
-                                numTwoHitsLoose += 1
-                            else:
-                                if self.config.onlysamedirtwohits:
-                                    twoHitInvalid = True
-                                    break
-                                numTwoHits += 1
-                                for l in ladders:
-                                    if l['ladderbase'] == candEventSpecs['event'].startHole.num + p:
-                                        if abs(l['length'] - candEventSpecs['event'].length) < 3:
-                                            twoHitInvalid = True
-                                            break
-                                        twoHitNetLengths.append(l['length'] - candEventSpecs['event'].length)
-                                        break
-                        if self.searchOrderedListForVal(chuteTops, candEventSpecs['event'].startHole.num + p) > -1:
-                            if abs(p) == 4:
-                                numTwoHitsLoose += 1
-                            else:
-                                numTwoHits += 1
-                                for c in chutes:
-                                    if c['chutetop'] == candEventSpecs['event'].startHole.num + p:
-                                        twoHitNetLengths.append((-1) * c['length'] - candEventSpecs['event'].length)
-                                        break
+                    # Forward: opposite-type (ladder) matches guarded, same-type
+                    # (chute) matches unguarded -- mirror image of the LADDERONLY
+                    # branch above; see _scan_two_hits_for_direction's docstring.
+                    deltaHits, deltaLoose, deltaLengths, invalid = self._scan_two_hits_for_direction(
+                        candEventSpecs['event'].startHole.num, (1, 2, 4),
+                        ladderBases, ladders, 'ladderbase', True, lambda el, ll: ll - el,
+                        chuteTops, chutes, 'chutetop', False, lambda el, cl: (-1) * cl - el,
+                        candEventSpecs['event'].length)
+                    numTwoHits += deltaHits
+                    numTwoHitsLoose += deltaLoose
+                    twoHitNetLengths.extend(deltaLengths)
+                    twoHitInvalid = twoHitInvalid or invalid
                     if twoHitInvalid: continue
 
-                    for p in (-1, -2, -4):
-                        if self.searchOrderedListForVal(ladderTops, candEventSpecs['event'].endHole.num + p) > -1:
-                            if abs(p) == 4:
-                                numTwoHitsLoose += 1
-                            else:
-                                if self.config.onlysamedirtwohits:
-                                    twoHitInvalid = True
-                                    break
-                                numTwoHits += 1
-                                for l in ladders:
-                                    if l['laddertop'] == candEventSpecs['event'].endHole.num + p:
-                                        if abs(l['length'] - candEventSpecs['event'].length) < 3:
-                                            twoHitInvalid = True
-                                            break
-                                        twoHitNetLengths.append(l['length'] - candEventSpecs['event'].length)
-                                        break
-                        if self.searchOrderedListForVal(chuteBases, candEventSpecs['event'].endHole.num + p) > -1:
-                            if abs(p) == 4:
-                                numTwoHitsLoose += 1
-                            else:
-                                numTwoHits += 1
-                                for c in chutes:
-                                    if c['chutebase'] == candEventSpecs['event'].endHole.num + p:
-                                        twoHitNetLengths.append((-1) * c['length'] - candEventSpecs['event'].length)
-                                        break
+                    deltaHits, deltaLoose, deltaLengths, invalid = self._scan_two_hits_for_direction(
+                        candEventSpecs['event'].endHole.num, (-1, -2, -4),
+                        ladderTops, ladders, 'laddertop', True, lambda el, ll: ll - el,
+                        chuteBases, chutes, 'chutebase', False, lambda el, cl: (-1) * cl - el,
+                        candEventSpecs['event'].length)
+                    numTwoHits += deltaHits
+                    numTwoHitsLoose += deltaLoose
+                    twoHitNetLengths.extend(deltaLengths)
+                    twoHitInvalid = twoHitInvalid or invalid
                     if twoHitInvalid: continue
 
                 if len(twoHitNetLengths) > 0 and (min(twoHitNetLengths) < (-1) * self.config.maxtwohitnetgainloss or

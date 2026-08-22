@@ -565,5 +565,125 @@ def test_build_track_state_computes_expected_fields_for_one_track():
     assert track.eventSetBuild == []
 
 
+def _bare_event_set_builder(onlysamedirtwohits=False):
+    """A builder with only .config set -- _scan_two_hits_for_direction
+    only reads self.config.onlysamedirtwohits and calls
+    self.searchOrderedListForVal (a pure delegate to
+    event_curve_math.search_ordered_list_for_val), so it needs nothing
+    else off a real EventSetBuilder instance."""
+    builder = object.__new__(EventSetBuilder)
+    builder.config = GameConfig(onlysamedirtwohits=onlysamedirtwohits)
+    return builder
+
+
+# ---------------------------------------------------------------------
+# _scan_two_hits_for_direction -- Phase 8 step 3
+# ---------------------------------------------------------------------
+# scoreEventsForHole's two-hit detection used to be four ~25-line
+# duplicated blocks (ladder-instance forward/backward, chute-instance
+# forward/backward), each scanning a "same event type as the one being
+# placed" position list and an "opposite type" one. Collapsed into this
+# one shared method, called four times from scoreEventsForHole with
+# different position lists/match keys/net-length formulas/guard flags
+# per call -- see its docstring for the full parameter mapping.
+
+def test_scan_two_hits_for_direction_counts_strict_and_loose_hits():
+    builder = _bare_event_set_builder(onlysamedirtwohits=False)
+    ladders = [{'ladderbase': 11, 'length': 5}]
+    chutes = [{'chutetop': 12, 'length': 3}]
+    # ref=10, p in (1,2,4): ladderBases has 11 (p=1, strict), chuteTops
+    # has 12 (p=2, strict); p=4 (ref+4=14) matches neither -> no hit at
+    # all for p=4, not a "loose" one (loose only happens when the
+    # *position list* itself contains ref+4, matched here by neither).
+    num_hits, num_loose, net_lengths, invalid = builder._scan_two_hits_for_direction(
+        10, (1, 2, 4),
+        [11], ladders, 'ladderbase', False, lambda el, ll: ll + el,
+        [12], chutes, 'chutetop', False, lambda el, cl: el - cl,
+        event_length=7)
+    assert invalid is False
+    assert num_hits == 2
+    assert num_loose == 0
+    assert sorted(net_lengths) == sorted([5 + 7, 7 - 3])
+
+
+def test_scan_two_hits_for_direction_counts_loose_hit_at_offset_four():
+    builder = _bare_event_set_builder()
+    # A match at p=4 is "loose" -- counted separately, no items lookup,
+    # no net-length contribution, and (per the original code) never
+    # guarded regardless of onlysamedirtwohits, since the guard only
+    # lives in the `else` branch taken when abs(p) != 4.
+    builder.config = GameConfig(onlysamedirtwohits=True)
+    num_hits, num_loose, net_lengths, invalid = builder._scan_two_hits_for_direction(
+        10, (1, 2, 4),
+        [14], [], 'ladderbase', True, lambda el, ll: ll + el,
+        [], [], 'chutetop', True, lambda el, cl: el - cl,
+        event_length=7)
+    assert invalid is False
+    assert num_hits == 0
+    assert num_loose == 1
+    assert net_lengths == []
+
+
+def test_scan_two_hits_for_direction_guards_only_the_flagged_side():
+    """
+    Characterizes the asymmetry documented in the method's own
+    docstring TODO: in the original inline code, a same-dir-twohits
+    rejection only ever applied to the "opposite event type" scan, never
+    the "same type" one, in every one of the four duplicated blocks.
+    Reproduced here directly rather than via a full scoreEventsForHole
+    call (which needs a much larger fixture) -- this is the exact
+    guarded/unguarded split scoreEventsForHole's four call sites use.
+    """
+    builder = _bare_event_set_builder(onlysamedirtwohits=True)
+    ladders = [{'ladderbase': 11, 'length': 5}]
+    chutes = [{'chutetop': 12, 'length': 3}]
+
+    # primary (ladder) unguarded, secondary (chute) guarded -- matches
+    # the LADDERONLY-forward call site. The chute match at p=2 is
+    # rejected outright (onlysamedirtwohits=True) before its length or
+    # net-length is even looked at, but the ladder match at p=1 (which
+    # ran first, same p-loop) was already counted.
+    num_hits, num_loose, net_lengths, invalid = builder._scan_two_hits_for_direction(
+        10, (1, 2, 4),
+        [11], ladders, 'ladderbase', False, lambda el, ll: ll + el,
+        [12], chutes, 'chutetop', True, lambda el, cl: el - cl,
+        event_length=7)
+    assert invalid is True
+    assert num_hits == 1  # only the unguarded ladder match got counted
+    assert net_lengths == [5 + 7]  # only the ladder match's net length
+
+    # Flip which side is guarded (matches the CHUTEONLY-forward call
+    # site): now the ladder match at p=1 is the one that gets rejected,
+    # before the chute match at p=2 (later in the same p-loop) ever runs.
+    num_hits2, num_loose2, net_lengths2, invalid2 = builder._scan_two_hits_for_direction(
+        10, (1, 2, 4),
+        [11], ladders, 'ladderbase', True, lambda el, ll: ll - el,
+        [12], chutes, 'chutetop', False, lambda el, cl: (-1) * cl - el,
+        event_length=7)
+    assert invalid2 is True
+    assert num_hits2 == 0
+    assert net_lengths2 == []
+
+
+def test_scan_two_hits_for_direction_guarded_length_rejection_after_counting():
+    """
+    The "matched item's length within 3 of this event's length"
+    invalidity check (also gated by the guard flag) runs *after*
+    num_two_hits has already been incremented for that match -- verbatim
+    from the original (numTwoHits += 1 happens before the inner items
+    loop's length check in every block that has one).
+    """
+    builder = _bare_event_set_builder(onlysamedirtwohits=False)
+    ladders = [{'ladderbase': 11, 'length': 8}]  # |8 - 7| = 1, < 3 -> invalid
+    num_hits, num_loose, net_lengths, invalid = builder._scan_two_hits_for_direction(
+        10, (1, 2, 4),
+        [11], ladders, 'ladderbase', True, lambda el, ll: ll - el,
+        [], [], 'chutetop', True, lambda el, cl: el - cl,
+        event_length=7)
+    assert invalid is True
+    assert num_hits == 1  # counted before the length check rejected it
+    assert net_lengths == []  # net length never appended
+
+
 if __name__ == '__main__':
     unittest.main()
