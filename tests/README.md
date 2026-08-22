@@ -240,7 +240,49 @@ extensions). `pytest -m integration` is the rest.
       `event_curve_math.actualize_curve(...)`), so no existing call
       site -- production code (`cribbage_main.py`) or the rest of the
       test suite -- needed to change.
-- `test_integration_*.py` -- Phase 5.
+- `test_integration_gameplay.py`, `test_integration_board_optimizer.py` --
+  Phase 5 (integration tests), done. Both are `@pytest.mark.integration`
+  via a module-level `pytestmark`.
+  - `test_integration_gameplay.py` -- full agent-vs-agent playthroughs:
+    a real `Board`/`CribSquad`/`CribbageGame` played to completion with
+    a seeded `random.Random` injected through the `rng=` params Phase 2
+    already added. Two AI seams still needed standing in for, same
+    reasoning as Phase 2's unit tests: `Player.pegging_move()`'s default
+    `move_selector` calls the compiled `scoretree` extension (Tier 4,
+    "outside Python unit-test reach" per the refactor plan), so tests
+    inject `_first_legal_card_selector`, a deterministic pure-Python
+    stand-in that always plays a legal card. `Player.discard_crib()`'s
+    `expected_hand_value()` needs the huge precomputed `rankLookupTable`
+    pandas artifact (out of scope, see `test_player.py`), so it's
+    patched with `_approximate_hand_value`, which still calls the real
+    `ScoreHand.score_hand()` (just against the first discarded card
+    standing in for the cut card) rather than returning a mocked
+    constant -- `discard_crib()` is still choosing between genuinely
+    different real hand scores. Neither stand-in changes what's under
+    test: the engine's dealing/discarding/pegging/hand-scoring/board-
+    movement/win-detection orchestration, not either AI's decision
+    quality. Covers 3-player and 2-player games, a board with no
+    chutes/ladders at all, and two determinism checks (same seed -> byte
+    -for-byte identical move log; different seeds -> not all identical,
+    confirming the rng injection is actually wired through
+    `Deck.shuffle()`).
+  - `test_integration_board_optimizer.py` -- chains two things Phase
+    3/4's own integration tests only exercised separately: a `Board`
+    built by the real `setBoardFromDb()` I/O path against a temp
+    `AllBoards.db`, then a real `Optimizer` constructed against that
+    board and a *second* temp db (`Optimizer.db`), both resolved through
+    `GameConfig(data_root=tmp_path)` rather than the historical
+    hardcoded `'Boards/AllBoards.db'` / `'etc/Optimizer.db'` literals.
+    Runs one full parameter-adjustment cycle end to end
+    (`runIncrIteration` -> `setBestIterParams` -> `setupFminParamsList`
+    -> `getFminStarterParams`/`getFminBounds`) and checks the numbers
+    are internally consistent (hand-computed expected shift, same
+    formula as `test_optimizer.py`), plus that an out-of-bounds result
+    clamps instead of writing a value outside the seeded
+    `BoardTrackHints` bounds. Note: `setBoardFromDb`'s non-findmode
+    branch doesn't populate `Track.Track_ID` (only findmode does), so
+    this keys Optimizer params by `track.num` -- documented in the file
+    since it's the kind of thing a real call site would trip over too.
 
 ## Fixtures
 
