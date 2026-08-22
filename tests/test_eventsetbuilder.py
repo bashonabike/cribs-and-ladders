@@ -57,6 +57,7 @@
 # existing tests needed no changes for the decomposition itself. What's
 # new below is coverage of the injectable `plotter` seam specifically.
 
+import math
 import sqlite3
 import tempfile
 import types
@@ -66,10 +67,11 @@ from pathlib import Path
 
 import pytest
 
-from cribsandladders.EventSetBuilder import EventSetBuilder, ParamSet, TrackBuildState
+from cribsandladders.EventSetBuilder import EventSetBuilder, ParamSet, TrackBuildState, VectorCollisionTracker
 from cribsandladders.Board import Board, Track
 from cribsandladders.BaseLayout import Hole
 from cribsandladders.config import GameConfig
+from cribsandladders import event_curve_math
 import numpy as np
 import Enums as en
 
@@ -781,6 +783,239 @@ def test_score_events_for_hole_returns_expected_fitness_for_explicit_ladder_even
     builder.runPartialTrackEffLengthHoles.assert_called_once_with(
         7, [], 120, tentNewLadder=(3, 6), readMode=True)
     assert state.candcursor == 1
+
+
+# ---------------------------------------------------------------------
+# _derive_instance_geometry / VectorCollisionTracker -- Phase 9a/9b
+# ---------------------------------------------------------------------
+# Refactor Mk II Phase 9 (see [[Refactor Mk ii]]/Phase 9 Findings in the
+# Obsidian vault): the old updateVectorsTest bundled two jobs -- geometry
+# derivation (instanceStartVector/instanceEndVector/instanceLump) and
+# collision-set bookkeeping (add/discard on allVectorsTest/
+# baseVectorsTest) -- into one method, alongside a separate
+# testInterceptLegality doing collision *testing* against the same two
+# sets. 9a splits geometry derivation out into
+# EventSetBuilder._derive_instance_geometry; 9b wraps the two sets and
+# both collision operations (would_collide/commit) into
+# VectorCollisionTracker. Neither method had any pre-existing test
+# coverage (confirmed via grep before this work started), so these are
+# all new direct unit tests, not characterization of previously-tested
+# behavior -- verified instead by hand-tracing the moved code (identical
+# to the bodies quoted in Phase 9 Findings.md) against these inputs.
+
+class _FakePossibleEventsForGeometry:
+    """Duck-typed possibleEvents for _derive_instance_geometry: records
+    .calculate_distance calls and returns a fixed distance (so the
+    instanceLump arithmetic is independently recomputable in the test),
+    plus .orthogonal_vector/.config for the ortho case, which routes
+    through OrthoLineTrace -- same shape as test_ortho_path_and_line_trace's
+    _FakePossibleEvents."""
+
+    def __init__(self, ortho_vector=(0.0, 4.0), distance=10.0):
+        self.config = types.SimpleNamespace(maxloopyorthoeventdisplacementincrements=4, eventminspacing=1.0)
+        self.ortho_vector = ortho_vector
+        self.distance = distance
+        self.distance_calls = []
+
+    def calculate_distance(self, p1, p2):
+        self.distance_calls.append((p1, p2))
+        return self.distance
+
+    def orthogonal_vector(self, start, end, dist, rev):
+        return self.ortho_vector
+
+
+def _expected_lump(start, end, dist):
+    start, end = np.array(start), np.array(end)
+    return (start + (end - start) * ((3 / dist) + math.pow(dist, 0.25) / 50)).tolist()
+
+
+def test_derive_instance_geometry_non_ortho_chute_lump_points_from_start_toward_end():
+    builder = object.__new__(EventSetBuilder)
+    pe = _FakePossibleEventsForGeometry(distance=10.0)
+    builder.possibleEvents = pe
+    event = types.SimpleNamespace(crowVector=((0.0, 0.0), (10.0, 0.0)),
+                                  instanceIsChute=True, instanceIsLadder=False)
+
+    builder._derive_instance_geometry(event, isOrtho=False)
+
+    assert pe.distance_calls == [((0.0, 0.0), (10.0, 0.0))]
+    assert event.instanceLump == pytest.approx(_expected_lump((0.0, 0.0), (10.0, 0.0), 10.0))
+
+
+def test_derive_instance_geometry_non_ortho_ladder_lump_points_from_end_toward_start():
+    builder = object.__new__(EventSetBuilder)
+    pe = _FakePossibleEventsForGeometry(distance=10.0)
+    builder.possibleEvents = pe
+    event = types.SimpleNamespace(crowVector=((0.0, 0.0), (10.0, 0.0)),
+                                  instanceIsChute=False, instanceIsLadder=True)
+
+    builder._derive_instance_geometry(event, isOrtho=False)
+
+    # Ladder branch swaps start/end relative to the chute branch.
+    assert event.instanceLump == pytest.approx(_expected_lump((10.0, 0.0), (0.0, 0.0), 10.0))
+
+
+def test_derive_instance_geometry_non_ortho_skips_lump_when_not_a_cancel():
+    """instanceIsChute == instanceIsLadder (both False, or both True for a
+    hypothetical two-hit) means the event isn't a chute/ladder cancel --
+    the original code never computes instanceLump in that case."""
+    builder = object.__new__(EventSetBuilder)
+    pe = _FakePossibleEventsForGeometry()
+    builder.possibleEvents = pe
+    event = types.SimpleNamespace(crowVector=((0.0, 0.0), (10.0, 0.0)),
+                                  instanceIsChute=False, instanceIsLadder=False)
+
+    builder._derive_instance_geometry(event, isOrtho=False)
+
+    assert pe.distance_calls == []
+    assert not hasattr(event, 'instanceLump')
+
+
+def test_derive_instance_geometry_ortho_computes_start_end_vectors_and_lump():
+    builder = object.__new__(EventSetBuilder)
+    pe = _FakePossibleEventsForGeometry(ortho_vector=(0.0, 4.0), distance=10.0)
+    builder.possibleEvents = pe
+    event = types.SimpleNamespace(
+        startHole=types.SimpleNamespace(coords=(0.0, 0.0)),
+        endHole=types.SimpleNamespace(coords=(10.0, 0.0)),
+        orthoVector=(0.0, 1.0),  # dead-code input inside OrthoLineTrace (computed then discarded), still required
+        instanceIncr=2, instanceRev=False,
+        instanceIsChute=True, instanceIsLadder=False)
+
+    builder._derive_instance_geometry(event, isOrtho=True)
+
+    # midpoint = (5, 0); length_divider = incr/maxloopyorthoeventdisplacementincrements = 2/4 = 0.5
+    # p2 = midpoint + ortho_vector * length_divider = (5 + 0*0.5, 0 + 4*0.5) = (5.0, 2.0)
+    assert event.instanceStartVector == ((0.0, 0.0), (5.0, 2.0))
+    assert event.instanceEndVector == ((10.0, 0.0), (5.0, 2.0))
+    # instanceIsChute -> lump derived from instanceStartVector
+    assert event.instanceLump == pytest.approx(_expected_lump((0.0, 0.0), (5.0, 2.0), 10.0))
+
+
+# --- VectorCollisionTracker.commit -------------------------------------
+
+class _FakePossibleEventsForBoundingBox:
+    """Duck-typed possibleEvents for VectorCollisionTracker.commit's
+    bounding-box computation: a fixed, real .orthogonal_vector return so
+    the expected bounding box can be computed by calling the real
+    (separately-tested, in test_event_curve_math.py)
+    event_curve_math.bounding_box_plus_vector directly, rather than
+    re-deriving the geometry by hand."""
+
+    def orthogonal_vector(self, start, end, dist, rev):
+        return (0.0, 1.0)
+
+
+def test_vector_collision_tracker_commit_non_ortho_adds_bounding_box_and_base_vector():
+    pe = _FakePossibleEventsForBoundingBox()
+    config = GameConfig()
+    tracker = VectorCollisionTracker(pe, config)
+    crow_vector = ((0.0, 0.0), (10.0, 0.0))
+    event = types.SimpleNamespace(crowVector=crow_vector)
+
+    tracker.commit(event, isOrtho=False)
+
+    ortho_dxdy = pe.orthogonal_vector(crow_vector[0], crow_vector[1], config.eventminspacing / 2.0, False)
+    expected_box = set(event_curve_math.bounding_box_plus_vector(crow_vector, ortho_dxdy))
+    assert tracker.all_vectors == expected_box
+    assert tracker.base_vectors == {crow_vector}
+
+
+def test_vector_collision_tracker_commit_ortho_adds_both_bounding_boxes_and_base_vectors():
+    pe = _FakePossibleEventsForBoundingBox()
+    config = GameConfig()
+    tracker = VectorCollisionTracker(pe, config)
+    start_vector = ((0.0, 0.0), (5.0, 2.0))
+    end_vector = ((10.0, 0.0), (5.0, 2.0))
+    event = types.SimpleNamespace(instanceStartVector=start_vector, instanceEndVector=end_vector)
+
+    tracker.commit(event, isOrtho=True)
+
+    ortho_dxdy_start = pe.orthogonal_vector(start_vector[0], start_vector[1], config.eventminspacing / 2.0, False)
+    ortho_dxdy_end = pe.orthogonal_vector(end_vector[0], end_vector[1], config.eventminspacing / 2.0, False)
+    expected_box = (set(event_curve_math.bounding_box_plus_vector(start_vector, ortho_dxdy_start))
+                    | set(event_curve_math.bounding_box_plus_vector(end_vector, ortho_dxdy_end)))
+    assert tracker.all_vectors == expected_box
+    assert tracker.base_vectors == {start_vector, end_vector}
+
+
+def test_vector_collision_tracker_commit_removal_non_ortho_discards_what_was_added():
+    pe = _FakePossibleEventsForBoundingBox()
+    tracker = VectorCollisionTracker(pe, GameConfig())
+    crow_vector = ((0.0, 0.0), (10.0, 0.0))
+    event = types.SimpleNamespace(crowVector=crow_vector)
+    tracker.commit(event, isOrtho=False)
+
+    tracker.commit(event, isOrtho=False, removal=True)
+
+    assert tracker.all_vectors == set()
+    assert tracker.base_vectors == set()
+
+
+def test_vector_collision_tracker_commit_removal_ortho_skips_all_vectors_when_instance_incr_not_set():
+    """Characterizes the original updateVectorsTest's removal-path
+    asymmetry: the all_vectors difference_update is gated on
+    `event.instanceIncr > -1`, but base_vectors.discard always runs
+    regardless. Preserved verbatim -- not exercised by any current call
+    site (removal=True has zero call sites, same as before this
+    refactor), so this is characterizing dead-but-preserved structure,
+    not live behavior."""
+    pe = _FakePossibleEventsForBoundingBox()
+    tracker = VectorCollisionTracker(pe, GameConfig())
+    start_vector = ((0.0, 0.0), (5.0, 2.0))
+    end_vector = ((10.0, 0.0), (5.0, 2.0))
+    event = types.SimpleNamespace(instanceStartVector=start_vector, instanceEndVector=end_vector)
+    tracker.commit(event, isOrtho=True)
+    populated_all_vectors = set(tracker.all_vectors)
+
+    event.instanceIncr = -1
+    tracker.commit(event, isOrtho=True, removal=True)
+
+    assert tracker.all_vectors == populated_all_vectors  # untouched -- instanceIncr not > -1
+    assert tracker.base_vectors == set()  # discarded unconditionally
+
+
+# --- VectorCollisionTracker.would_collide -------------------------------
+# Only the non-ortho path is covered directly here -- it needs nothing
+# off `t` and delegates straight through to
+# possibleEvents.check_intersections. The ortho path's own geometry
+# (orthogonal_vector/test_sidestep_events) already has dedicated coverage
+# via PossibleEvents' own tests (test_possible_events.py); would_collide
+# just threads self.all_vectors through unchanged from the original
+# testInterceptLegality body.
+
+class _FakePossibleEventsForIntersections:
+    def __init__(self, collides):
+        self.collides = collides
+        self.calls = []
+
+    def check_intersections(self, vectors, all_vectors, postGenTest=False):
+        self.calls.append((vectors, all_vectors, postGenTest))
+        return self.collides
+
+
+def test_vector_collision_tracker_would_collide_non_ortho_rejects_on_intersection():
+    pe = _FakePossibleEventsForIntersections(collides=True)
+    tracker = VectorCollisionTracker(pe, GameConfig())
+    event = types.SimpleNamespace(isOrtho=False, crowVector=((0.0, 0.0), (1.0, 1.0)))
+
+    legal, orthoInst = tracker.would_collide(event, t=None)
+
+    assert legal is False
+    assert orthoInst == dict(incr=-1, rev=False)
+    assert pe.calls == [({event.crowVector}, tracker.all_vectors, True)]
+
+
+def test_vector_collision_tracker_would_collide_non_ortho_allows_when_no_intersection():
+    pe = _FakePossibleEventsForIntersections(collides=False)
+    tracker = VectorCollisionTracker(pe, GameConfig())
+    event = types.SimpleNamespace(isOrtho=False, crowVector=((0.0, 0.0), (1.0, 1.0)))
+
+    legal, orthoInst = tracker.would_collide(event, t=None)
+
+    assert legal is True
+    assert orthoInst == dict(incr=-1, rev=False)
 
 
 if __name__ == '__main__':

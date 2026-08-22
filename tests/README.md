@@ -535,10 +535,71 @@ extensions). `pytest -m integration` is the rest.
   `TrackBuildState` -> two-hit dedup -> scoring-body extraction);
   `EventSetBuilder.py`'s largest method (`scoreEventsForHole`, 473
   lines before Phase 8) is now three much smaller, independently named
-  pieces. Phase 9 (the `EventSetBuilder` Category A collision-tracking
-  redesign -- `allVectorsTest`/`baseVectorsTest`/`tryEventSet`'s main
-  placement loop) remains separately scoped future work per the Mk II
-  plan, not started here.
+  pieces.
+- Refactor Mk II Phase 9, done (`EventSetBuilder` collision-tracking
+  redesign -- see [[Refactor Mk ii]]/Phase 9 Findings.md in the Obsidian
+  vault for the design spike this started from). The spike found the
+  Mk II plan's scope was already smaller than assumed: Phase 8 had
+  already decoupled `scoreEventsForHole` from `allVectorsTest`/
+  `baseVectorsTest` entirely, `buildPartialSetIntoTrack` turned out to
+  be dead code (zero call sites -- flagged with a TODO on its docstring,
+  not touched further), and the old `updateVectorsTest`'s `removal=True`
+  branch turned out to be dead too (zero call sites -- structure
+  preserved, behavior not characterized). What remained was two
+  responsibilities bundled into `updateVectorsTest`: geometry derivation
+  and collision-set bookkeeping, plus a separate `testInterceptLegality`
+  doing collision testing against the same two bare sets.
+
+  **9a** pulled the geometry derivation (computing
+  `instanceStartVector`/`instanceEndVector` via `OrthoLineTrace` for
+  ortho events, and `instanceLump` via
+  `self.possibleEvents.calculate_distance` for either kind when
+  `instanceIsChute != instanceIsLadder`) out of `updateVectorsTest` into
+  its own method, `EventSetBuilder._derive_instance_geometry(event,
+  isOrtho)`, mutating `event` in place -- same computation, pure code
+  motion.
+
+  **9b** introduced `VectorCollisionTracker` (defined next to
+  `TrackBuildState`, before `class EventSetBuilder`), wrapping what used
+  to be two bare `allVectorsTest`/`baseVectorsTest` sets threaded by
+  hand through `tryEventSet`/`tryGetEventForHole`. Its `would_collide
+  (curEvent, t)` is `testInterceptLegality`'s original body, verbatim,
+  operating on `self.all_vectors` -- the original `baseVectorsTest`
+  parameter is dropped entirely, since reading it confirmed it was never
+  referenced anywhere in that method's body. Its `commit(event, isOrtho,
+  removal=False)` is the pure set-mutation half of the former
+  `updateVectorsTest` (assumes `_derive_instance_geometry` already ran).
+  `testInterceptLegality`/`updateVectorsTest` no longer exist as
+  standalone `EventSetBuilder` methods -- both are fully absorbed, and
+  neither had any test coverage or callers outside `EventSetBuilder.py`
+  itself (confirmed via `grep` before removing them).
+  `tryGetEventForHole`'s signature changed from `(hole, t,
+  interceptsTestVectors, baseVectorsTest, params, trackEventsOverview)`
+  to `(hole, t, tracker, params, trackEventsOverview)`; `tryEventSet`'s
+  main loop now constructs one `VectorCollisionTracker(self.
+  possibleEvents, self.config)` per call instead of the two bare sets,
+  and calls `self._derive_instance_geometry(curEvent, isOrtho)` +
+  `tracker.commit(curEvent, isOrtho)` instead of `self.
+  updateVectorsTest(...)`.
+
+  Neither method had pre-existing test coverage, so this step's tests
+  are new direct unit tests rather than characterization of previously-
+  tested behavior (verified instead by hand-tracing the moved code
+  against known inputs, the same rigor as the golden tests above):
+  `test_derive_instance_geometry_*` (non-ortho chute/ladder lump
+  direction, the "not a cancel -> no lump computed" skip, and the ortho
+  start/end-vector + lump case, using a duck-typed fake `possibleEvents`
+  in the same shape as `test_ortho_path_and_line_trace.py`'s), and
+  `test_vector_collision_tracker_*` for `commit` (non-ortho and ortho
+  adds, non-ortho removal, and an ortho removal case that characterizes
+  an existing asymmetry -- `all_vectors`' difference_update is gated on
+  `event.instanceIncr > -1` but `base_vectors.discard` always runs
+  regardless, preserved verbatim from the original since `removal=True`
+  has no live call site to observe) and `would_collide` (non-ortho path
+  only -- it needs nothing off `t` and delegates straight to
+  `possibleEvents.check_intersections`; the ortho path's own geometry
+  already has dedicated coverage via `PossibleEvents`' own tests, so
+  wasn't re-derived here).
 
 ## Fixtures
 

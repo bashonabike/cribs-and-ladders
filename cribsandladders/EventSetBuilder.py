@@ -139,6 +139,148 @@ class TrackBuildState:
     numnogos: int = 0
 
 
+class VectorCollisionTracker:
+    """
+    Tracks vectors occupied by already-placed event instances, and tests
+    candidate events for collisions against them.
+
+    Refactor Mk II Phase 9b (see [[Refactor Mk ii]]/Phase 9 Findings in
+    the Obsidian vault): replaces the pair of bare `allVectorsTest`/
+    `baseVectorsTest` sets that `tryEventSet` used to construct and thread
+    through `tryGetEventForHole`/`testInterceptLegality`/`updateVectorsTest`
+    by hand. `would_collide` is `testInterceptLegality`'s original body,
+    verbatim, operating on `self.all_vectors` -- the original
+    `baseVectorsTest` parameter is dropped entirely, since it was never
+    referenced anywhere in that method's body (confirmed by reading it).
+    `commit` is the pure set-mutation half of the former
+    `updateVectorsTest` (the other half, geometry derivation, is
+    `EventSetBuilder._derive_instance_geometry`, Phase 9a -- callers must
+    invoke that first so `event.crowVector`/`event.instanceStartVector`/
+    `event.instanceEndVector` already exist).
+
+    Note: `commit`'s `removal=True` path is preserved structurally (for
+    possible future backtracking work) but, same as the original
+    `updateVectorsTest`, has zero call sites today -- nothing in the live
+    codebase ever undoes a placement -- so it has no characterization
+    test.
+    """
+
+    def __init__(self, possibleEvents, config):
+        self.possibleEvents = possibleEvents
+        self.config = config
+        self.all_vectors = set()
+        self.base_vectors = set()
+
+    def _bounding_box_plus_vector(self, vector):
+        # Same computation as EventSetBuilder.boundingBoxPlusVector --
+        # duplicated here (rather than reaching back into EventSetBuilder)
+        # so this class only depends on possibleEvents/config, which it
+        # already holds.
+        ortho_dxdy = self.possibleEvents.orthogonal_vector(vector[0], vector[1], self.config.eventminspacing / 2.0, False)
+        return event_curve_math.bounding_box_plus_vector(vector, ortho_dxdy)
+
+    def would_collide(self, curEvent, t):
+        """
+        Test if an event's vector intercepts with existing tracked vectors.
+
+        Returns:
+            Tuple of (is_legal, result_dict) where is_legal indicates if the intercept is allowed.
+        """
+        if not curEvent.isOrtho:
+            if self.possibleEvents.check_intersections({curEvent.crowVector}, self.all_vectors, postGenTest=True):
+                return False, dict(incr=-1, rev=False)
+            else:
+                return True, dict(incr=-1, rev=False)
+        else:
+            bestIncr, revOrtho = 999, False
+            runs = []
+            if curEvent.orthoFwdMinIncr > 0:
+                runs.append(dict(rev=False, minincr=curEvent.orthoFwdMinIncr, maxincr=curEvent.orthoFwdMaxIncr))
+            if curEvent.orthoRevMinIncr > 0:
+                runs.append(dict(rev=True, minincr=curEvent.orthoRevMinIncr, maxincr=curEvent.orthoRevMaxIncr))
+
+            if len(self.all_vectors) == 150:
+                sfds = ""
+            for run in runs:
+                ortho = self.possibleEvents.orthogonal_vector(curEvent.startHole.coords, curEvent.endHole.coords,
+                                                              self.config.maxloopyorthoeventdisplacementincrements
+                                                              * self.config.eventminspacing, run['rev'])
+                floor, peak = self.possibleEvents.test_sidestep_events(
+                    curEvent.startHole, curEvent.endHole, t.track.trackholes, t.holecoords,
+                    ortho, self.config.maxloopyorthoeventdisplacementincrements * self.config.eventminspacing, self.config.eventminspacing,
+                    self.all_vectors, run['rev'], minIncr=run['minincr'], maxIncr=run['maxincr'], ignoreProximity=True)
+                if floor > 0 and floor < bestIncr:
+                    bestIncr = floor
+                    revOrtho = run['rev']
+            if bestIncr == 999 or bestIncr == 0:
+                return False, dict(incr=-1, rev=False)
+            else:
+                # TEMPP
+                if len(runs) == 1 or runs[0]['rev'] == revOrtho:
+                    run = runs[0]
+                else:
+                    run = runs[1]
+                ortho = self.possibleEvents.orthogonal_vector(curEvent.startHole.coords, curEvent.endHole.coords,
+                                                              self.config.maxloopyorthoeventdisplacementincrements
+                                                              * self.config.eventminspacing, revOrtho)
+                self.possibleEvents.test_sidestep_events(
+                    curEvent.startHole, curEvent.endHole, t.track.trackholes, t.holecoords,
+                    ortho, self.config.maxloopyorthoeventdisplacementincrements * self.config.eventminspacing, self.config.eventminspacing,
+                    self.all_vectors, revOrtho, minIncr=run['minincr'], maxIncr=run['maxincr'], ignoreProximity=True,
+                    debugTest=True)
+                return True, dict(incr=bestIncr, rev=revOrtho)
+
+    def commit(self, event, isOrtho, removal=False):
+        """
+        Add (or, structurally preserved for future backtracking, remove)
+        an already-geometry-derived event's vectors to/from the tracked
+        collision sets. Assumes
+        `EventSetBuilder._derive_instance_geometry(event, isOrtho)` has
+        already been called by the caller.
+
+        Args:
+            event: The event being added or removed.
+            isOrtho: Boolean indicating if the event is orthogonal.
+            removal: Boolean indicating whether to remove the event's
+                vectors (True) or add them (False). No current call site
+                passes True (see class docstring).
+        """
+        if len(self.all_vectors) == 150:
+            # Debug breakpoint condition
+            sfsd = ""
+        if not removal:
+            if not isOrtho:
+                self.all_vectors.update(
+                    set(tuple(
+                        [v for v in self._bounding_box_plus_vector(event.crowVector)])))
+                self.base_vectors.add(event.crowVector)
+            else:
+                self.all_vectors.update(
+                    set(tuple(
+                        [v for v in self._bounding_box_plus_vector(event.instanceStartVector)])))
+                self.all_vectors.update(
+                    set(tuple(
+                        [v for v in self._bounding_box_plus_vector(event.instanceEndVector)])))
+                self.base_vectors.add(event.instanceStartVector)
+                self.base_vectors.add(event.instanceEndVector)
+        else:
+            if not isOrtho:
+                self.all_vectors.difference_update(
+                    set(tuple(
+                        [v for v in self._bounding_box_plus_vector(event.crowVector)])))
+                self.base_vectors.discard(event.crowVector)
+            else:
+                if event.instanceIncr > -1:
+                    self.all_vectors.difference_update(
+                        set(tuple(
+                            [v for v in self._bounding_box_plus_vector(event.instanceStartVector)])))
+                    self.all_vectors.difference_update(
+                        set(tuple(
+                            [v for v in self._bounding_box_plus_vector(event.instanceEndVector)])))
+                self.base_vectors.discard(event.instanceStartVector)
+                self.base_vectors.discard(event.instanceEndVector)
+
+
 class EventSetBuilder:
     """
     A class to build and optimize event sets for a board game with tracks and events.
@@ -461,15 +603,28 @@ class EventSetBuilder:
     def buildPartialSetIntoTrack(self, track, startPoint, stopPoint):
         """
         Build a partial set of events into a track between specified points.
-        
+
         This method adds events to a track between the given start and stop points,
         handling both regular and shared events that may span multiple tracks.
-        
+
         Args:
             track: The track to add events to.
             startPoint: Starting index for event selection.
             stopPoint: Ending index for event selection.
-            
+
+        TODO(liam): flagged by the Phase 9 design spike (see [[Refactor
+        Mk ii]]/Phase 9 Findings in the Obsidian vault). This method has
+        zero call sites anywhere in the repo -- dead code. Its own
+        vector-intersection-checking logic is commented out inline
+        below ("TODO: figure this out in possible events, for now just
+        excluding here"), so as it stands it just picks a random
+        candidate event (`rd.choice`) and adds it with no collision
+        checking at all, unlike `tryEventSet`'s real placement loop
+        (`tryGetEventForHole`/`VectorCollisionTracker`). Not part of the
+        Phase 9 collision-tracker redesign -- worth deciding separately
+        whether to revive this (wiring it into the commented-out check,
+        or the real `VectorCollisionTracker`) or delete it.
+
         Note:
             For shared events, this will also add linked events to other tracks.
         """
@@ -1328,79 +1483,67 @@ class EventSetBuilder:
         """
         return event_curve_math.search_ordered_list_for_val(orderedList, val)
 
-    def testInterceptLegality(self, curEvent, allVectorsTest, baseVectorsTest, t):
+    def _derive_instance_geometry(self, event, isOrtho):
         """
-        Test if an event's vector intercepts with existing vectors.
-        
+        Compute an event instance's placement geometry -- instanceStartVector/
+        instanceEndVector (orthogonal events only, via OrthoLineTrace) and
+        instanceLump (either kind, when instanceIsChute != instanceIsLadder,
+        via self.possibleEvents.calculate_distance) -- so it can be handed to
+        a VectorCollisionTracker's commit().
+
+        Refactor Mk II Phase 9a (see [[Refactor Mk ii]]/Phase 9 Findings in
+        the Obsidian vault): geometry-derivation half of the former
+        updateVectorsTest, split out verbatim (same computation, same
+        mutation of `event` in place) from the pure collision-set
+        bookkeeping half, which is now VectorCollisionTracker.commit.
+
         Args:
-            curEvent: The event to test.
-            allVectorsTest: Set of all vectors to test against.
-            baseVectorsTest: Base vectors to test against.
-            t: Track information.
-            
-        Returns:
-            Tuple of (is_legal, result_dict) where is_legal indicates if the intercept is allowed.
+            event: The event instance to derive geometry for. Mutated in place.
+            isOrtho: Boolean indicating if the event is orthogonal.
         """
-        if not curEvent.isOrtho:
-            if self.possibleEvents.check_intersections({curEvent.crowVector}, allVectorsTest, postGenTest=True):
-                return False, dict(incr=-1, rev=False)
-            else:
-                return True, dict(incr=-1, rev=False)
-        else:
-            bestIncr, revOrtho = 999, False
-            runs = []
-            if curEvent.orthoFwdMinIncr > 0:
-                runs.append(dict(rev=False, minincr=curEvent.orthoFwdMinIncr, maxincr=curEvent.orthoFwdMaxIncr))
-            if curEvent.orthoRevMinIncr > 0:
-                runs.append(dict(rev=True, minincr=curEvent.orthoRevMinIncr, maxincr=curEvent.orthoRevMaxIncr))
-
-            if len(allVectorsTest) == 150:
-                sfds = ""
-            for run in runs:
-                ortho = self.possibleEvents.orthogonal_vector(curEvent.startHole.coords, curEvent.endHole.coords,
-                                                              self.config.maxloopyorthoeventdisplacementincrements
-                                                              * self.config.eventminspacing, run['rev'])
-                floor, peak = self.possibleEvents.test_sidestep_events(
-                    curEvent.startHole, curEvent.endHole, t.track.trackholes, t.holecoords,
-                    ortho, self.config.maxloopyorthoeventdisplacementincrements * self.config.eventminspacing, self.config.eventminspacing,
-                    allVectorsTest, run['rev'], minIncr=run['minincr'], maxIncr=run['maxincr'], ignoreProximity=True)
-                if floor > 0 and floor < bestIncr:
-                    bestIncr = floor
-                    revOrtho = run['rev']
-            if bestIncr == 999 or bestIncr == 0:
-                return False, dict(incr=-1, rev=False)
-            else:
-                # TEMPP
-                if len(runs) == 1 or runs[0]['rev'] == revOrtho:
-                    run = runs[0]
+        if not isOrtho:
+            # Add lumps 20% of the way along so ppl know cant go that way
+            if event.instanceIsChute != event.instanceIsLadder:
+                start, end = np.array(event.crowVector[0]), np.array(event.crowVector[1])
+                dist = self.possibleEvents.calculate_distance(event.crowVector[0], event.crowVector[1])
+                if event.instanceIsChute:
+                    event.instanceLump = (start + (end - start) * ((3 / dist) + math.pow(dist, 0.25) / 50)).tolist()
                 else:
-                    run = runs[1]
-                ortho = self.possibleEvents.orthogonal_vector(curEvent.startHole.coords, curEvent.endHole.coords,
-                                                              self.config.maxloopyorthoeventdisplacementincrements
-                                                              * self.config.eventminspacing, revOrtho)
-                self.possibleEvents.test_sidestep_events(
-                    curEvent.startHole, curEvent.endHole, t.track.trackholes, t.holecoords,
-                    ortho, self.config.maxloopyorthoeventdisplacementincrements * self.config.eventminspacing, self.config.eventminspacing,
-                    allVectorsTest, revOrtho, minIncr=run['minincr'], maxIncr=run['maxincr'], ignoreProximity=True,
-                    debugTest=True)
-                return True, dict(incr=bestIncr, rev=revOrtho)
+                    event.instanceLump = (end + (start - end) * ((3 / dist) + math.pow(dist, 0.25) / 50)).tolist()
+        else:
+            event.instanceStartVector = OrthoLineTrace(self.possibleEvents, event, event.instanceIncr,
+                                                       event.instanceRev,
+                                                       en.OrthoLineTraceType.START).vector
+            event.instanceEndVector = OrthoLineTrace(self.possibleEvents, event, event.instanceIncr,
+                                                     event.instanceRev,
+                                                     en.OrthoLineTraceType.END).vector
 
-    def tryGetEventForHole(self, hole, t, interceptsTestVectors, baseVectorsTest, params, trackEventsOverview):
+            # Add lumps 20% of the way along so ppl know cant go that way
+            if event.instanceIsChute != event.instanceIsLadder:
+                vector = event.instanceStartVector if event.instanceIsChute else event.instanceEndVector
+                start, end = np.array(vector[0]), np.array(vector[1])
+                dist = self.possibleEvents.calculate_distance(vector[0], vector[1])
+                event.instanceLump = (start + (end - start) * ((3 / dist) + math.pow(dist, 0.25) / 50)).tolist()
+
+    def tryGetEventForHole(self, hole, t, tracker, params, trackEventsOverview):
         """
         Attempts to find and return the most suitable event for a given hole on a track.
-        
+
         This method evaluates potential events for a specific hole based on various factors including
         energy buffer levels, event spacing, and distribution patterns. It ensures that events are
         placed in a way that maintains game balance and follows design constraints.
-        
+
         Args:
             hole: The hole object to find an event for.
             t: Dictionary containing track-specific data including energy buffer and event candidates.
-            interceptsTestVectors: Set of vectors to test for intercepts with potential events.
-            baseVectorsTest: Set of base vectors used for intercept testing.
+            tracker: VectorCollisionTracker used to test candidate events for
+                collisions against already-placed event vectors (Phase 9b;
+                replaces the former separate interceptsTestVectors/
+                baseVectorsTest set params -- baseVectorsTest was never
+                actually referenced by the legality check).
             params: Parameter set containing configuration values for event selection.
             trackEventsOverview: Overview of all track events for reference and scoring.
-            
+
         Returns:
             dict: A dictionary containing the selected event and its fitness score, or None if no
                   suitable event is found. The dictionary includes:
@@ -1458,8 +1601,7 @@ class EventSetBuilder:
         # Find fittest event
         if eventFitnesses is not None and len(eventFitnesses) > 0:
             for fitness in eventFitnesses:
-                legal, orthoInst = self.testInterceptLegality(fitness['event'], interceptsTestVectors, baseVectorsTest,
-                                                              t)
+                legal, orthoInst = tracker.would_collide(fitness['event'], t)
                 if legal:
                     if orthoInst['incr'] > -1:
                         fitness['event'].instanceIncr = orthoInst['incr']
@@ -1479,84 +1621,6 @@ class EventSetBuilder:
         (which, like this method, mutates trackEventOverview in place).
         """
         event_curve_math.index_start_of_each_hole_in_cands(holes, trackEventOverview)
-
-    def updateVectorsTest(self, allVectorsTest, baseVectorsTest, event, removal, isOrtho):
-        """
-        Updates the test vectors used for collision detection when placing events.
-        
-        This method maintains sets of vectors that represent occupied spaces on the board to prevent
-        overlapping or conflicting event placements. It handles both orthogonal and non-orthogonal events,
-        and can add or remove vectors from the test sets.
-        
-        Args:
-            allVectorsTest: Set of all vectors currently occupied by events.
-            baseVectorsTest: Set of base vectors used for collision detection.
-            event: The event being added or removed.
-            removal: Boolean indicating whether to remove the event's vectors (True) or add them (False).
-            isOrtho: Boolean indicating if the event is orthogonal.
-            
-        Note:
-            For non-orthogonal events, this also handles the creation of 'lump' markers that indicate
-            restricted areas around chutes and ladders.
-        """
-        if len(allVectorsTest) == 150:
-            # Debug breakpoint condition
-            sfsd = ""
-        if not removal:
-            if not isOrtho:
-                allVectorsTest.update(
-                    set(tuple(
-                        [v for v in self.boundingBoxPlusVector(event.crowVector)])))
-
-                # Add lumps 20% of the way along so ppl know cant go that way
-                if event.instanceIsChute != event.instanceIsLadder:
-                    start, end = np.array(event.crowVector[0]), np.array(event.crowVector[1])
-                    dist = self.possibleEvents.calculate_distance(event.crowVector[0], event.crowVector[1])
-                    if event.instanceIsChute:
-                        event.instanceLump = (start + (end - start) * ((3 / dist) + math.pow(dist, 0.25) / 50)).tolist()
-                    else:
-                        event.instanceLump = (end + (start - end) * ((3 / dist) + math.pow(dist, 0.25) / 50)).tolist()
-
-                baseVectorsTest.add(event.crowVector)
-            else:
-                event.instanceStartVector = OrthoLineTrace(self.possibleEvents, event, event.instanceIncr,
-                                                           event.instanceRev,
-                                                           en.OrthoLineTraceType.START).vector
-                event.instanceEndVector = OrthoLineTrace(self.possibleEvents, event, event.instanceIncr,
-                                                         event.instanceRev,
-                                                         en.OrthoLineTraceType.END).vector
-
-                # Add lumps 20% of the way along so ppl know cant go that way
-                if event.instanceIsChute != event.instanceIsLadder:
-                    vector = event.instanceStartVector if event.instanceIsChute else event.instanceEndVector
-                    start, end = np.array(vector[0]), np.array(vector[1])
-                    dist = self.possibleEvents.calculate_distance(vector[0], vector[1])
-                    event.instanceLump = (start + (end - start) * ((3 / dist) + math.pow(dist, 0.25) / 50)).tolist()
-
-                allVectorsTest.update(
-                    set(tuple(
-                        [v for v in self.boundingBoxPlusVector(event.instanceStartVector)])))
-                allVectorsTest.update(
-                    set(tuple(
-                        [v for v in self.boundingBoxPlusVector(event.instanceEndVector)])))
-                baseVectorsTest.add(event.instanceStartVector)
-                baseVectorsTest.add(event.instanceEndVector)
-        else:
-            if not isOrtho:
-                allVectorsTest.difference_update(
-                    set(tuple(
-                        [v for v in self.boundingBoxPlusVector(event.crowVector)])))
-                baseVectorsTest.discard(event.crowVector)
-            else:
-                if event.instanceIncr > -1:
-                    allVectorsTest.difference_update(
-                        set(tuple(
-                            [v for v in self.boundingBoxPlusVector(event.instanceStartVector)])))
-                    allVectorsTest.difference_update(
-                        set(tuple(
-                            [v for v in self.boundingBoxPlusVector(event.instanceEndVector)])))
-                baseVectorsTest.discard(event.instanceStartVector)
-                baseVectorsTest.discard(event.instanceEndVector)
 
     def recalcTrackCompletionPcts(self, trackEventsOverview):
         """
@@ -1607,8 +1671,7 @@ class EventSetBuilder:
 
         # Initial pass, try to populate tracks in tandem
         avgHolePct, avgChutesPct = 0.0, 0.0
-        allVectorsTest = set()
-        baseVectorsTest = set()
+        tracker = VectorCollisionTracker(self.possibleEvents, self.config)
         allTentative, allDirectTentative, allOrthoTentative = [], [], []
         stallCounter = 0
         while (len([t for t in trackEventsOverview if t.holescompletepct <
@@ -1636,7 +1699,7 @@ class EventSetBuilder:
                         t.curhole += 1
                         t.minspacectr += 1
                         curHoleObj = t.track.getHoleByNum(t.curhole)
-                        idealEventWithFitness = self.tryGetEventForHole(curHoleObj, t, allVectorsTest, baseVectorsTest,
+                        idealEventWithFitness = self.tryGetEventForHole(curHoleObj, t, tracker,
                                                                         params, trackEventsOverview)
                     else:
                         # Pop queued multi event
@@ -1686,7 +1749,8 @@ class EventSetBuilder:
                         if curEvent.instanceCancel: t.cancels += 1
                         t.eventscount += 1
 
-                        self.updateVectorsTest(allVectorsTest, baseVectorsTest, curEvent, False, isOrtho)
+                        self._derive_instance_geometry(curEvent, isOrtho)
+                        tracker.commit(curEvent, isOrtho)
                         t.twohitsthusfar += idealEventWithFitness['twohits']
                         t.curestefflength = idealEventWithFitness['estefflength']
                         if idealEventWithFitness['instchute']:
