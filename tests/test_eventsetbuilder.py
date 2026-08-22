@@ -63,8 +63,11 @@ import unittest
 import unittest.mock as mock
 from pathlib import Path
 
+import pytest
+
 from cribsandladders.EventSetBuilder import EventSetBuilder, ParamSet
 from cribsandladders.Board import Board, Track
+from cribsandladders.BaseLayout import Hole
 from cribsandladders.config import GameConfig
 import numpy as np
 import Enums as en
@@ -406,6 +409,156 @@ class TestParamSet(unittest.TestCase):
         # returns 0 (not None) when optional and no record is found.
         value = self.param_set.tryGetParam(1, 'non_existent_param', optional=True)
         self.assertEqual(value, 0)
+
+
+def _write_svg(path, *paths, height=100, width=200):
+    """Same minimal-SVG helper test_event_curve_math.py uses -- writes a
+    real file this time (rather than an io.StringIO) since
+    EventSetBuilder.getNormalizedIdealCurve is handed a path string
+    (self.config.eventenergyfile etc.), not a file-like object."""
+    path_tags = "\n".join('<path d="{}" />'.format(d) for d in paths)
+    path.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" height="{}mm" width="{}mm">\n{}\n</svg>'.format(
+            height, width, path_tags
+        )
+    )
+
+
+def _make_candidate(start, end, length, can_be_ladder):
+    c = mock.MagicMock()
+    c.startHole.num = start
+    c.endHole.num = end
+    c.length = length
+    c.canBeLadder = can_be_ladder
+    c.isShared = False
+    return c
+
+
+def test_build_track_state_computes_expected_fields_for_one_track():
+    """
+    Phase 8 step 1 characterization test for
+    EventSetBuilder._build_track_state -- the setup preamble pulled out
+    of tryEventSet() as pure code motion (see [[Refactor Mk ii]] in the
+    Obsidian vault). Exercises the real per-track math (candidate-spec
+    construction, energy-potential skew, length-distribution/length-
+    over-time/energy curve building) end to end, using real curve SVGs
+    written to a temp data_root -- EventSetBuilder's default curve file
+    paths point at Boards/MicroBoard1/CURVES/*.svg, which (per
+    config.py's own comment on eventenergyfile) don't exist anywhere in
+    this repo, which is exactly why nothing exercised this code path for
+    real before (see test_try_event_set's skip reason above).
+
+    The one thing NOT exercised for real here is
+    runPartialTrackEffLengthHoles's Markov-chain simulation (readMode=
+    True needs pre-generated benchmark moves from a real Optimizer db,
+    plus the compiled markovgame extension for the non-readMode path) --
+    it's mocked to a fixed return value, the same pattern
+    test_optimize_setup already uses to mock out
+    tryEventSet/buildSetIntoEvents rather than stand up their real
+    dependencies.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        data_root = Path(tmp)
+        (data_root / "Boards" / "MicroBoard1" / "CURVES").mkdir(parents=True)
+        (data_root / "etc").mkdir(parents=True, exist_ok=True)
+
+        # Known-good minimal curve (same points test_event_curve_math.py's
+        # own scaling test uses): raw coords (10,80),(30,60),(50,40) after
+        # BaseLayout's y-flip, normalizing to x in [0,1], y in [0,1].
+        curve_paths = ("m 10,20 5,0 5,0", "m 30,40 5,0 5,0", "m 50,60 5,0 5,0")
+        _write_svg(data_root / "Boards" / "MicroBoard1" / "CURVES" / "energy.svg", *curve_paths)
+        _write_svg(data_root / "Boards" / "MicroBoard1" / "CURVES" / "event-length-dist-hist.svg", *curve_paths)
+        _write_svg(data_root / "etc" / "eventlengthovertimeidealcurve1.svg", *curve_paths)
+
+        config = GameConfig(data_root=data_root, numplayers=3)
+
+        track = Track()
+        track.num = 1
+        track.Track_ID = 7
+        track.length = 20
+        track.instLocked = False
+        track.eventSetBuild = []
+        track.trackholes = [Hole(float(i), 0.0, num=i + 1, tracknum=1) for i in range(20)]
+        track.candidateEvents = mock.MagicMock()
+        track.candidateEvents.candidateEvents = [
+            _make_candidate(1, 3, 2, True),
+            _make_candidate(4, 9, 5, False),
+            _make_candidate(2, 6, 4, True),
+        ]
+
+        mock_board = mock.MagicMock(spec=Board)
+        mock_board.boardID = 1
+        mock_board.config = config
+        mock_board.tracks = [track]
+
+        with mock.patch(
+            'cribsandladders.EventSetBuilder.EventSetBuilder.retrieveOrGenerateBenchmarkMoves',
+            return_value=None,
+        ):
+            builder = EventSetBuilder(mock_board, mock.MagicMock(), config=config)
+
+        builder.runPartialTrackEffLengthHoles = mock.MagicMock(return_value=(15, []))
+
+        param_values = {
+            'ladderscanstartat': 0,
+            'candenergyskewdiminisher': 1.0,
+            'baseopteventspertrack': 10,
+            'baseoptfirstchute': 3,
+            'eventspacingdeviationfactor': 1.0,
+        }
+        params = mock.MagicMock()
+        params.tryGetParam.side_effect = lambda track_id, name: param_values[name]
+
+        result = builder._build_track_state(params)
+
+    assert len(result) == 1
+    state = result[0]
+    assert state['track'] is track
+    assert state['track_id'] == 7
+    assert state['tracklength'] == 20
+
+    # runPartialTrackEffLengthHoles was mocked -- confirms the delegation
+    # happens with the args tryEventSet's preamble always used.
+    assert state['controllength'] == 15
+    builder.runPartialTrackEffLengthHoles.assert_called_once_with(7, [], 20, readMode=True)
+
+    # Only one track, so its avg candidate energy potential equals the
+    # "overall" average by construction -- energy skew is exactly 0,
+    # making optevents/optfirstchute fall out to their unskewed base
+    # values (deterministic, no dependency on the curve files' shape).
+    assert state['candeventspecs'] and len(state['candeventspecs']) == 3
+    # Sorted by (eventtop, length) -- eventtop is endHole.num (3, 9, 6).
+    assert [c['length'] for c in state['candeventspecs']] == [2, 4, 5]
+    assert state['optevents'] == 10
+    assert state['optfirstchute'] == 3
+    assert state['candavgenergy'] == (2 + 5 + 4 + 2 + 4) / 3
+
+    # maxlength / lengthdistactualhist are both driven by the max candidate
+    # length (5), independent of the curve files' actual shape.
+    assert state['maxlength'] == 5
+    assert state['lengthdistactualhist'] == [[i + 1, 0] for i in range(5)]
+
+    # spacinghisto: range(int((optevents / len(trackholes)) * factor)) =
+    # range(int((10/20) * 1.0)) = range(0) -- empty, not a curve-shape artifact.
+    assert state['spacinghisto'] == []
+
+    # compensationbuffer = lengthdeviation * effectiveboardlength, and
+    # lengthdeviation = (tracklength - effectiveboardlength) / effectiveboardlength,
+    # so the effectiveboardlength terms cancel algebraically regardless of
+    # its actual value -- a config-independent identity check.
+    assert state['compensationbuffer'] == pytest.approx(20 - config.effectiveboardlength)
+
+    assert isinstance(state['trackenergycurve'], list) and len(state['trackenergycurve']) > 0
+    assert isinstance(state['trackenergyintegral'], list) and len(state['trackenergyintegral']) > 0
+    assert isinstance(state['lengthdistidealcurve'], list) and len(state['lengthdistidealcurve']) > 0
+    assert isinstance(state['lengthovertimeideal'], list) and len(state['lengthovertimeideal']) > 0
+
+    assert state['eventsetbuild'] == []
+    assert state['nomultis'] is False
+    # setTentativeEvents([]) is called as part of the preamble -- a no-op
+    # here since eventSetBuild was already [], but confirms the real
+    # (non-mocked) Track method still gets called against a real Track.
+    assert track.eventSetBuild == []
 
 
 if __name__ == '__main__':

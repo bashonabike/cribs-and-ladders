@@ -1452,122 +1452,7 @@ class EventSetBuilder:
 
         start_time = time.time()
         self.board.clearTrackEvents(specificTracks=[t for t in self.board.tracks if not t.instLocked])
-        trackEventsOverview = [dict(track=t, trackidx=t.num - 1, tracknum=t.num, optevents=0, track_id=t.Track_ID,
-                                    optfirstchute=0, trackfilled=False, tracklength=len(t.trackholes),
-                                    lengthdeviation=(
-                                                                len(t.trackholes) - self.config.effectiveboardlength) / self.config.effectiveboardlength,
-                                    spacinghisto=[], minspacectr=0,  # chosenscorecutoff=100,
-                                    eventsetbuild=t.eventSetBuild, candeventspecs=[],
-                                    lengthdistidealcurve=[], lengthdistactualhist=[],
-                                    lengthovertimeideal=[], maxlength=0,
-                                    trackenergycurve=[], trackenergyintegral=[],
-                                    candavgenergy=0.0, energybuffer=0.0, energybufferidx=0, candeventstartlookup=[],
-                                    candcursor=0, chutecursor=0, holecoords=[h.coords for h in t.trackholes],
-                                    lasteventtop=0, previsladder=False, chutebases=[], chutetops=[],
-                                    ladders=[], chutes=[],
-                                    eventnodes=[], twohitsthusfar=0, cancels=0, eventscount=0,
-                                    ladderbases=[], laddertops=[], holescompletepct=0.0, chutescompletepct=0.0,
-                                    curhole=0,
-                                    compensationbuffer=0.0, trackstalledcounter=0, trackisstalled=False,
-                                    multistack=[], controllength=0, curestefflength=len(t.trackholes),
-                                    nomultis=False,
-                                    numdenies=0, numnogos=0)
-                               for t in self.board.tracks if not t.instLocked]
-
-        # Lock out multis if one or more tracks are locked
-        if len(trackEventsOverview) != len(self.board.tracks):
-            for t in trackEventsOverview: t['nomultis'] = True
-
-        # Retrieve & normalize energy curve and det integral
-        energyCurve, energyNormIntegral = self.getEnergyCurve()
-
-        # Retrieve & normalize length dist hist curve
-        normLengthHistDist = self.getNormLengthDistCurve()
-
-        # Retrieve & normalize length dist over time curve
-        normLengthOverTimeDist = self.getNormLengthOverTimeCurve()
-
-        # Compute overall figures & charts
-        allCands = [c for c in [t['track'].candidateEvents.candidateEvents for t in trackEventsOverview] for c in c]
-        self.allTentLengthHisto = []
-        for i in range(0, max([c.length for c in allCands])):
-            self.allTentLengthHisto.append([i + 1, 0])
-
-        allCandsEnergyPotentialBuilder = 0.0
-        for i in range(0, len(trackEventsOverview)):
-            allCandsEnergyPotentialBuilder += sum([c.length * (
-                2 if (True if c.startHole.num < params.tryGetParam(trackEventsOverview[i]['track_id'],
-                                                                   'ladderscanstartat')
-                      else c.canBeLadder) else 1)
-                                                   for c in
-                                                   trackEventsOverview[i]['track'].candidateEvents.candidateEvents])
-        avgOverallCandEnergyPotential = allCandsEnergyPotentialBuilder / len(allCands)
-
-        # Iterate over tracks, create event when energy buildup exceeds req
-
-        for t in trackEventsOverview:
-            # Determine control lengths with blank track
-            t['controllength'] = self.runPartialTrackEffLengthHoles(t['track_id'], [],
-                                                                    t['tracklength'],
-                                                                    readMode=True)[0]
-            if t['controllength'] == 9999999:
-                raise Exception("Failed initial control length")
-                sdfsd = ""
-
-            # Create track-specific energy curve
-            candEventSpecs = [dict(event=c, isshared=c.isShared, eventtop=c.endHole.num, eventbase=c.startHole.num,
-                                   length=c.length,
-                                   canbeladder=False if c.startHole.num <
-                                                        params.tryGetParam(t['track_id'], 'ladderscanstartat')
-                                   else c.canBeLadder)
-                              for c in t['track'].candidateEvents.candidateEvents]
-            candEventSpecs.sort(key=lambda c: (c['eventtop'], c['length']))
-            t['candeventspecs'] = candEventSpecs
-
-            # NOTE: energy counts double for chutes + ladders, since energy is defined by position modulation force
-            candEnergyPotential = (sum([c['length'] for c in candEventSpecs]) +
-                                   sum([c['length'] for c in candEventSpecs if c['canbeladder']]))
-            candAvgEnergy = candEnergyPotential / len(candEventSpecs)
-            t['candavgenergy'] = candAvgEnergy
-
-            # If the avg cand nrg is more than global avg, fewer events & vice versa
-            candEnergySkew = ((candAvgEnergy - avgOverallCandEnergyPotential) /
-                              (avgOverallCandEnergyPotential * params.tryGetParam(t['track_id'],
-                                                                                  'candenergyskewdiminisher')))
-            t['optevents'] = int(params.tryGetParam(t['track_id'], 'baseopteventspertrack') * (1.0 - candEnergySkew))
-            t['optfirstchute'] = int(params.tryGetParam(t['track_id'], 'baseoptfirstchute') * (1.0 + candEnergySkew))
-
-            # Set up ideal length distribution curve
-            discrLengthDistCurve = self.discretizeCurve(normLengthHistDist, max([c['length'] for c in candEventSpecs]))
-            t['lengthdistidealcurve'] = self.actualizeCurve(discrLengthDistCurve, 1,
-                                                            t['optevents'] / sum([n[1] for n in discrLengthDistCurve]))
-            t['lengthdistactualhist'] = []
-            for i in range(0, max([c['length'] for c in candEventSpecs])):
-                t['lengthdistactualhist'].append([i + 1, 0])
-
-            # Set up ideal length over time curve
-            discrLengthOverTimeCurve = self.discretizeCurve(normLengthOverTimeDist,
-                                                            len(t['track'].trackholes))
-            t['lengthovertimeideal'] = self.actualizeCurve(discrLengthOverTimeCurve, 1,
-                                                           max([c['length'] for c in candEventSpecs]))
-            t['maxlength'] = max([c['length'] for c in candEventSpecs])
-
-            # Set up spacing histogram to help ensure even distribution
-            t['spacinghisto'] = []
-            for i in range(0, int((t['optevents'] / len(t['track'].trackholes)) * params.tryGetParam(t['track_id'],
-                                                                                                     'eventspacingdeviationfactor'))):
-                t['spacinghisto'].append([i + 1, 0])
-
-            normTrackCurveNetEnergy = sum([c[1] for c in energyCurve])
-            trackEnergyCurve = self.actualizeCurve(energyCurve, t['track'].length,
-                                                   (candAvgEnergy * t['optevents']) / normTrackCurveNetEnergy)
-            t['trackenergycurve'] = trackEnergyCurve
-            trackEnergyIntegral = self.actualizeCurve(energyNormIntegral, t['track'].length,
-                                                      candAvgEnergy * t['optevents'], integrate=True)
-            t['trackenergyintegral'] = trackEnergyIntegral
-            t['compensationbuffer'] = t['lengthdeviation'] * self.config.effectiveboardlength
-            t['track'].setTentativeEvents([])
-            t['eventsetbuild'] = t['track'].eventSetBuild
+        trackEventsOverview = self._build_track_state(params)
 
         # Initial pass, try to populate tracks in tandem
         avgHolePct, avgChutesPct = 0.0, 0.0
@@ -1806,6 +1691,149 @@ class EventSetBuilder:
         print("Scoring took up %s" % totScore)
 
         return True
+
+    def _build_track_state(self, params):
+        """
+        Builds tryEventSet's per-track working-state list
+        (`trackEventsOverview`, a plain dict per active track -- see the
+        TODO on tryEventSet's own docstring re: the CandidateEvents
+        precondition, and Phase 8 step 2 of the Mk II plan for turning
+        this dict shape into a real `TrackBuildState` class). Phase 8 code
+        motion (verbatim, no logic changed) of tryEventSet's setup
+        preamble -- no branching back into the placement loop below it,
+        which is what makes this the safest possible first extraction out
+        of this method.
+
+        Builds one dict per track not already `instLocked`, from that
+        track's real `CandidateEvents` (must already be populated -- see
+        the precondition documented on `tryEventSet`), plus the energy/
+        length-distribution curves retrieved via `self.getEnergyCurve()`/
+        `self.getNormLengthDistCurve()`/`self.getNormLengthOverTimeCurve()`.
+
+        Args:
+            params: parameter set (same as tryEventSet's `params`).
+
+        Returns:
+            list[dict]: one working-state dict per active track.
+        """
+        trackEventsOverview = [dict(track=t, trackidx=t.num - 1, tracknum=t.num, optevents=0, track_id=t.Track_ID,
+                                    optfirstchute=0, trackfilled=False, tracklength=len(t.trackholes),
+                                    lengthdeviation=(
+                                                                len(t.trackholes) - self.config.effectiveboardlength) / self.config.effectiveboardlength,
+                                    spacinghisto=[], minspacectr=0,  # chosenscorecutoff=100,
+                                    eventsetbuild=t.eventSetBuild, candeventspecs=[],
+                                    lengthdistidealcurve=[], lengthdistactualhist=[],
+                                    lengthovertimeideal=[], maxlength=0,
+                                    trackenergycurve=[], trackenergyintegral=[],
+                                    candavgenergy=0.0, energybuffer=0.0, energybufferidx=0, candeventstartlookup=[],
+                                    candcursor=0, chutecursor=0, holecoords=[h.coords for h in t.trackholes],
+                                    lasteventtop=0, previsladder=False, chutebases=[], chutetops=[],
+                                    ladders=[], chutes=[],
+                                    eventnodes=[], twohitsthusfar=0, cancels=0, eventscount=0,
+                                    ladderbases=[], laddertops=[], holescompletepct=0.0, chutescompletepct=0.0,
+                                    curhole=0,
+                                    compensationbuffer=0.0, trackstalledcounter=0, trackisstalled=False,
+                                    multistack=[], controllength=0, curestefflength=len(t.trackholes),
+                                    nomultis=False,
+                                    numdenies=0, numnogos=0)
+                               for t in self.board.tracks if not t.instLocked]
+
+        # Lock out multis if one or more tracks are locked
+        if len(trackEventsOverview) != len(self.board.tracks):
+            for t in trackEventsOverview: t['nomultis'] = True
+
+        # Retrieve & normalize energy curve and det integral
+        energyCurve, energyNormIntegral = self.getEnergyCurve()
+
+        # Retrieve & normalize length dist hist curve
+        normLengthHistDist = self.getNormLengthDistCurve()
+
+        # Retrieve & normalize length dist over time curve
+        normLengthOverTimeDist = self.getNormLengthOverTimeCurve()
+
+        # Compute overall figures & charts
+        allCands = [c for c in [t['track'].candidateEvents.candidateEvents for t in trackEventsOverview] for c in c]
+        self.allTentLengthHisto = []
+        for i in range(0, max([c.length for c in allCands])):
+            self.allTentLengthHisto.append([i + 1, 0])
+
+        allCandsEnergyPotentialBuilder = 0.0
+        for i in range(0, len(trackEventsOverview)):
+            allCandsEnergyPotentialBuilder += sum([c.length * (
+                2 if (True if c.startHole.num < params.tryGetParam(trackEventsOverview[i]['track_id'],
+                                                                   'ladderscanstartat')
+                      else c.canBeLadder) else 1)
+                                                   for c in
+                                                   trackEventsOverview[i]['track'].candidateEvents.candidateEvents])
+        avgOverallCandEnergyPotential = allCandsEnergyPotentialBuilder / len(allCands)
+
+        # Iterate over tracks, create event when energy buildup exceeds req
+
+        for t in trackEventsOverview:
+            # Determine control lengths with blank track
+            t['controllength'] = self.runPartialTrackEffLengthHoles(t['track_id'], [],
+                                                                    t['tracklength'],
+                                                                    readMode=True)[0]
+            if t['controllength'] == 9999999:
+                raise Exception("Failed initial control length")
+                sdfsd = ""
+
+            # Create track-specific energy curve
+            candEventSpecs = [dict(event=c, isshared=c.isShared, eventtop=c.endHole.num, eventbase=c.startHole.num,
+                                   length=c.length,
+                                   canbeladder=False if c.startHole.num <
+                                                        params.tryGetParam(t['track_id'], 'ladderscanstartat')
+                                   else c.canBeLadder)
+                              for c in t['track'].candidateEvents.candidateEvents]
+            candEventSpecs.sort(key=lambda c: (c['eventtop'], c['length']))
+            t['candeventspecs'] = candEventSpecs
+
+            # NOTE: energy counts double for chutes + ladders, since energy is defined by position modulation force
+            candEnergyPotential = (sum([c['length'] for c in candEventSpecs]) +
+                                   sum([c['length'] for c in candEventSpecs if c['canbeladder']]))
+            candAvgEnergy = candEnergyPotential / len(candEventSpecs)
+            t['candavgenergy'] = candAvgEnergy
+
+            # If the avg cand nrg is more than global avg, fewer events & vice versa
+            candEnergySkew = ((candAvgEnergy - avgOverallCandEnergyPotential) /
+                              (avgOverallCandEnergyPotential * params.tryGetParam(t['track_id'],
+                                                                                  'candenergyskewdiminisher')))
+            t['optevents'] = int(params.tryGetParam(t['track_id'], 'baseopteventspertrack') * (1.0 - candEnergySkew))
+            t['optfirstchute'] = int(params.tryGetParam(t['track_id'], 'baseoptfirstchute') * (1.0 + candEnergySkew))
+
+            # Set up ideal length distribution curve
+            discrLengthDistCurve = self.discretizeCurve(normLengthHistDist, max([c['length'] for c in candEventSpecs]))
+            t['lengthdistidealcurve'] = self.actualizeCurve(discrLengthDistCurve, 1,
+                                                            t['optevents'] / sum([n[1] for n in discrLengthDistCurve]))
+            t['lengthdistactualhist'] = []
+            for i in range(0, max([c['length'] for c in candEventSpecs])):
+                t['lengthdistactualhist'].append([i + 1, 0])
+
+            # Set up ideal length over time curve
+            discrLengthOverTimeCurve = self.discretizeCurve(normLengthOverTimeDist,
+                                                            len(t['track'].trackholes))
+            t['lengthovertimeideal'] = self.actualizeCurve(discrLengthOverTimeCurve, 1,
+                                                           max([c['length'] for c in candEventSpecs]))
+            t['maxlength'] = max([c['length'] for c in candEventSpecs])
+
+            # Set up spacing histogram to help ensure even distribution
+            t['spacinghisto'] = []
+            for i in range(0, int((t['optevents'] / len(t['track'].trackholes)) * params.tryGetParam(t['track_id'],
+                                                                                                     'eventspacingdeviationfactor'))):
+                t['spacinghisto'].append([i + 1, 0])
+
+            normTrackCurveNetEnergy = sum([c[1] for c in energyCurve])
+            trackEnergyCurve = self.actualizeCurve(energyCurve, t['track'].length,
+                                                   (candAvgEnergy * t['optevents']) / normTrackCurveNetEnergy)
+            t['trackenergycurve'] = trackEnergyCurve
+            trackEnergyIntegral = self.actualizeCurve(energyNormIntegral, t['track'].length,
+                                                      candAvgEnergy * t['optevents'], integrate=True)
+            t['trackenergyintegral'] = trackEnergyIntegral
+            t['compensationbuffer'] = t['lengthdeviation'] * self.config.effectiveboardlength
+            t['track'].setTentativeEvents([])
+            t['eventsetbuild'] = t['track'].eventSetBuild
+
+        return trackEventsOverview
 
     def testPlotVectorsOnHoles(self, vectors):
         """

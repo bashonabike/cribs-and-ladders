@@ -382,6 +382,47 @@ extensions). `pytest -m integration` is the rest.
   import inside `testPlotVectorsOnHoles` (its only user) -- the module's
   real geometry code uses `matplotlib.path`, not `pyplot`, so nothing
   else in the file needs it at import time.
+- `test_eventsetbuilder.py::test_build_track_state_computes_expected_fields_for_one_track`
+  -- Refactor Mk II ([[Refactor Mk ii]] in the Obsidian vault), Phase 8
+  step 1, done. `EventSetBuilder.tryEventSet`'s setup preamble (~115
+  lines: build one working-state dict per active track, retrieve/
+  normalize the energy and length-distribution curves, compute each
+  track's candidate-event specs/energy potential/length-distribution
+  curves/spacing histogram) had no branching back into the placement
+  loop that follows it, making it the safest possible first extraction
+  out of this 1798-line class -- pulled out verbatim into
+  `_build_track_state(self, params) -> list[dict]`, with `tryEventSet`
+  now just calling it and continuing with the placement loop unchanged.
+  (Needed a `return trackEventsOverview` added at the end, since the
+  original code never returned it -- it just kept reading/mutating the
+  same local for the rest of the method; that's the one line of this
+  extraction that isn't literally a cut-and-paste, since splitting a
+  method always needs *some* seam.)
+
+  Nothing exercised this preamble for real before: `test_try_event_set`
+  (the pre-existing test targeting `tryEventSet` as a whole) is skipped
+  because its fixture's `track1.candidateEvents` is `None`, and
+  separately, `EventSetBuilder`'s default curve file paths
+  (`Boards/MicroBoard1/CURVES/*.svg`) don't exist anywhere in this repo
+  (see the comment on `config.eventenergyfile`) -- so even a fixture
+  with real candidate events would have hit a `FileNotFoundError`. The
+  new test works around both: real minimal SVG curve files (same
+  points `test_event_curve_math.py`'s own scaling test uses) written to
+  a temp `data_root`, and a real `Track` with hand-built candidate-event
+  mocks (only `.startHole.num`/`.endHole.num`/`.length`/`.canBeLadder`/
+  `.isShared` are read). `runPartialTrackEffLengthHoles` (the one call
+  in this preamble needing a real Optimizer db and/or the compiled
+  `markovgame` extension for its Monte-Carlo simulation) is mocked to a
+  fixed return value -- same pattern `test_optimize_setup` already uses
+  to mock out `tryEventSet`/`buildSetIntoEvents` rather than stand up
+  their real dependencies. With only one track in play, its average
+  candidate energy potential trivially equals the "overall" average, so
+  the energy-skew adjustment is exactly zero and `optevents`/
+  `optfirstchute`/`candeventspecs` ordering are all asserted against
+  exact, curve-shape-independent values; the few fields that do depend
+  on the curve files' actual shape (`trackenergycurve`,
+  `trackenergyintegral`, `lengthdistidealcurve`, `lengthovertimeideal`)
+  are only checked for being non-empty lists, not exact values.
 
 ## Fixtures
 
