@@ -423,6 +423,44 @@ extensions). `pytest -m integration` is the rest.
   on the curve files' actual shape (`trackenergycurve`,
   `trackenergyintegral`, `lengthdistidealcurve`, `lengthovertimeideal`)
   are only checked for being non-empty lists, not exact values.
+- Refactor Mk II Phase 8 step 2, done: `trackEventsOverview`'s ~50-key
+  plain dict (built as a `dict(...)` literal, threaded through
+  `tryEventSet`'s placement loop and `scoreEventsForHole`/
+  `tryGetEventForHole` via `t['key']` string access) is now a real
+  `TrackBuildState` dataclass (`EventSetBuilder.py`, defined just above
+  the `EventSetBuilder` class). Purely structural -- every field's
+  value/semantics are unchanged, this just makes the schema explicit
+  and typo-proof, and per the Mk II plan, sets up unit-testing
+  individual scoring rules directly (via `object.__new__
+  (TrackBuildState)` + hand-set attributes, the same pattern
+  `test_optimizer.py`/`test_possible_events.py` already use for partial
+  fixtures) without needing a full placement run.
+
+  Converting every real call site's `t['key']`/`t_sub['key']`/
+  `t_match['key']` to `t.key` (`_build_track_state`,
+  `scoreEventsForHole`, `tryGetEventForHole`, the placement loop, and
+  `event_curve_math.recalc_track_completion_pcts`) was mechanical but
+  needed care in a few places a plain identifier-based search-and-
+  replace would've silently mishandled: `trackEventsOverview[i]['key']`
+  (list-index-then-dict-key, not a bare `t['key']` the same regex would
+  catch) had two call sites that needed fixing separately; and several
+  *other* dicts in the same file happen to reuse key names that also
+  appear on `TrackBuildState` (`prevEffLengths`/`effLengths` entries
+  also have a `track_id`/`efflength` key, `self.eventNodesByTrack`
+  entries also have a `tracknum` key, and the `fitness`/
+  `idealEventWithFitness` scoring-result dict returned by
+  `scoreEventsForHole` also has a `lasteventtop` key) -- those are
+  genuinely different, smaller dict shapes and were deliberately left
+  as plain dicts, not converted. `candeventspecs` (a `TrackBuildState`
+  field) similarly still holds a list of plain per-candidate dicts
+  (`eventtop`/`eventbase`/`length`/`canbeladder`/`isshared`/`event`) --
+  only the outer per-track structure was in scope for this step.
+
+  Existing test coverage (`test_eventsetbuilder.py`'s 16 tests,
+  `test_event_curve_math.py`'s 19 tests, full offline suite) all pass
+  unchanged; `test_recalc_track_completion_pcts_averages_over_viable_
+  tracks` and the new `_build_track_state` test both updated to build
+  `TrackBuildState` instances instead of dicts.
 
 ## Fixtures
 

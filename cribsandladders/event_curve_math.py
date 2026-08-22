@@ -275,7 +275,9 @@ def recalc_track_completion_pcts(trackEventsOverview, maxitertrackstalled):
     - The percentage of target events placed
 
     Args:
-        trackEventsOverview: List of dictionaries containing track event data.
+        trackEventsOverview: list of `EventSetBuilder.TrackBuildState`
+            instances (Refactor Mk II Phase 8 step 2 -- previously a
+            list of plain dicts with the same keys as attributes).
         maxitertrackstalled: threshold (from `config.maxitertrackstalled`)
             above which a track's stalled-iteration counter marks it as stalled.
 
@@ -285,13 +287,13 @@ def recalc_track_completion_pcts(trackEventsOverview, maxitertrackstalled):
             - Average chute completion percentage across all viable tracks
     """
     for t in trackEventsOverview:
-        t['trackisstalled'] = t['trackstalledcounter'] > maxitertrackstalled
-        t['holescompletepct'] = t['curhole'] / len(t['track'].trackholes)
-        t['chutescompletepct'] = len(t['eventsetbuild']) / t['optevents']
-    viableTracks = [e for e in trackEventsOverview if not e['trackisstalled']]
+        t.trackisstalled = t.trackstalledcounter > maxitertrackstalled
+        t.holescompletepct = t.curhole / len(t.track.trackholes)
+        t.chutescompletepct = len(t.eventsetbuild) / t.optevents
+    viableTracks = [e for e in trackEventsOverview if not e.trackisstalled]
 
-    avgHolePct = sum([t['holescompletepct'] for t in viableTracks]) / len(viableTracks)
-    avgChutesPct = sum([t['chutescompletepct'] for t in viableTracks]) / len(viableTracks)
+    avgHolePct = sum([t.holescompletepct for t in viableTracks]) / len(viableTracks)
+    avgChutesPct = sum([t.chutescompletepct for t in viableTracks]) / len(viableTracks)
     return avgHolePct, avgChutesPct
 
 

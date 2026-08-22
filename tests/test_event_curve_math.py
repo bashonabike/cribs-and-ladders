@@ -196,15 +196,24 @@ class _FakeTrack:
 
 
 def test_recalc_track_completion_pcts_averages_over_viable_tracks():
+    # Refactor Mk II Phase 8 step 2: trackEventsOverview elements are now
+    # real TrackBuildState instances (attribute access), not plain dicts
+    # -- this test used to build `dict(...)` fixtures directly; updated
+    # to build TrackBuildState instances instead (recalc_track_completion_pcts
+    # itself is unchanged in behavior, just how its input is shaped).
+    from cribsandladders.EventSetBuilder import TrackBuildState
+
     overview = [
-        dict(trackstalledcounter=0, curhole=5, track=_FakeTrack(10), eventsetbuild=[1, 2], optevents=4),
-        dict(trackstalledcounter=100, curhole=1, track=_FakeTrack(10), eventsetbuild=[], optevents=4),
+        TrackBuildState(track=_FakeTrack(10), trackidx=0, tracknum=1,
+                        trackstalledcounter=0, curhole=5, eventsetbuild=[1, 2], optevents=4),
+        TrackBuildState(track=_FakeTrack(10), trackidx=1, tracknum=2,
+                        trackstalledcounter=100, curhole=1, eventsetbuild=[], optevents=4),
     ]
     avg_hole_pct, avg_chutes_pct = ecm.recalc_track_completion_pcts(overview, maxitertrackstalled=50)
 
     # Second track is stalled (100 > 50) and excluded from the average.
-    assert overview[0]['trackisstalled'] is False
-    assert overview[1]['trackisstalled'] is True
+    assert overview[0].trackisstalled is False
+    assert overview[1].trackisstalled is True
     assert avg_hole_pct == 0.5  # 5/10 for the one viable track
     assert avg_chutes_pct == 0.5  # 2/4 for the one viable track
 

@@ -65,7 +65,7 @@ from pathlib import Path
 
 import pytest
 
-from cribsandladders.EventSetBuilder import EventSetBuilder, ParamSet
+from cribsandladders.EventSetBuilder import EventSetBuilder, ParamSet, TrackBuildState
 from cribsandladders.Board import Board, Track
 from cribsandladders.BaseLayout import Hole
 from cribsandladders.config import GameConfig
@@ -513,48 +513,52 @@ def test_build_track_state_computes_expected_fields_for_one_track():
 
     assert len(result) == 1
     state = result[0]
-    assert state['track'] is track
-    assert state['track_id'] == 7
-    assert state['tracklength'] == 20
+    assert isinstance(state, TrackBuildState)
+    assert state.track is track
+    assert state.track_id == 7
+    assert state.tracklength == 20
 
     # runPartialTrackEffLengthHoles was mocked -- confirms the delegation
     # happens with the args tryEventSet's preamble always used.
-    assert state['controllength'] == 15
+    assert state.controllength == 15
     builder.runPartialTrackEffLengthHoles.assert_called_once_with(7, [], 20, readMode=True)
 
     # Only one track, so its avg candidate energy potential equals the
     # "overall" average by construction -- energy skew is exactly 0,
     # making optevents/optfirstchute fall out to their unskewed base
     # values (deterministic, no dependency on the curve files' shape).
-    assert state['candeventspecs'] and len(state['candeventspecs']) == 3
+    # candeventspecs entries are themselves still plain per-candidate
+    # dicts (a separate, smaller structure the Mk II plan didn't ask to
+    # convert) -- only the outer TrackBuildState is a real class now.
+    assert state.candeventspecs and len(state.candeventspecs) == 3
     # Sorted by (eventtop, length) -- eventtop is endHole.num (3, 9, 6).
-    assert [c['length'] for c in state['candeventspecs']] == [2, 4, 5]
-    assert state['optevents'] == 10
-    assert state['optfirstchute'] == 3
-    assert state['candavgenergy'] == (2 + 5 + 4 + 2 + 4) / 3
+    assert [c['length'] for c in state.candeventspecs] == [2, 4, 5]
+    assert state.optevents == 10
+    assert state.optfirstchute == 3
+    assert state.candavgenergy == (2 + 5 + 4 + 2 + 4) / 3
 
     # maxlength / lengthdistactualhist are both driven by the max candidate
     # length (5), independent of the curve files' actual shape.
-    assert state['maxlength'] == 5
-    assert state['lengthdistactualhist'] == [[i + 1, 0] for i in range(5)]
+    assert state.maxlength == 5
+    assert state.lengthdistactualhist == [[i + 1, 0] for i in range(5)]
 
     # spacinghisto: range(int((optevents / len(trackholes)) * factor)) =
     # range(int((10/20) * 1.0)) = range(0) -- empty, not a curve-shape artifact.
-    assert state['spacinghisto'] == []
+    assert state.spacinghisto == []
 
     # compensationbuffer = lengthdeviation * effectiveboardlength, and
     # lengthdeviation = (tracklength - effectiveboardlength) / effectiveboardlength,
     # so the effectiveboardlength terms cancel algebraically regardless of
     # its actual value -- a config-independent identity check.
-    assert state['compensationbuffer'] == pytest.approx(20 - config.effectiveboardlength)
+    assert state.compensationbuffer == pytest.approx(20 - config.effectiveboardlength)
 
-    assert isinstance(state['trackenergycurve'], list) and len(state['trackenergycurve']) > 0
-    assert isinstance(state['trackenergyintegral'], list) and len(state['trackenergyintegral']) > 0
-    assert isinstance(state['lengthdistidealcurve'], list) and len(state['lengthdistidealcurve']) > 0
-    assert isinstance(state['lengthovertimeideal'], list) and len(state['lengthovertimeideal']) > 0
+    assert isinstance(state.trackenergycurve, list) and len(state.trackenergycurve) > 0
+    assert isinstance(state.trackenergyintegral, list) and len(state.trackenergyintegral) > 0
+    assert isinstance(state.lengthdistidealcurve, list) and len(state.lengthdistidealcurve) > 0
+    assert isinstance(state.lengthovertimeideal, list) and len(state.lengthovertimeideal) > 0
 
-    assert state['eventsetbuild'] == []
-    assert state['nomultis'] is False
+    assert state.eventsetbuild == []
+    assert state.nomultis is False
     # setTentativeEvents([]) is called as part of the preamble -- a no-op
     # here since eventSetBuild was already [], but confirms the real
     # (non-mocked) Track method still gets called against a real Track.
