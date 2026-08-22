@@ -10,6 +10,7 @@ import datetime as dt
 from io import StringIO
 import os
 from cribsandladders.config import GameConfig, DEFAULT_CONFIG
+from cribsandladders import stats_metrics as sm
 
 
 def build_insert_stat_stub(cursor):
@@ -172,142 +173,41 @@ class Stats:
         self.moves = curMoveSet
 
     def calc_metrics(self):
-        # Build dataframes & indices
-
         """
         Calculate statistics on the given moves.
+
+        Thin orchestrator (Refactor Mk II, Phase 6) -- see
+        cribsandladders/stats_metrics.py for the actual per-statistic
+        logic. This used to be one 137-line method building a chain of
+        merged DataFrames and computing ~20 named statistics from them
+        all inline; each is now a separate, independently unit-tested
+        function over already-built DataFrames instead of `self.board`/
+        `self.moves`. Calls run in the same order the original inline
+        code did and no behavior changed -- see stats_metrics.py's
+        module docstring for details.
 
         Parameters:
             moves (list): A list of Move objects to calculate statistics on.
         Returns:
             None
         """
-        moves_df = pd.DataFrame.from_records([m.to_dict() for m in self.moves])
-        ladders_df = pd.concat([t.getLaddersAsDF() for t in self.board.tracks])
-        chutes_df = pd.concat([t.getChutesAsDF() for t in self.board.tracks])
-        events_df = pd.concat([t.getEventsAsDF() for t in self.board.tracks])
+        (joined_df, moves_df, ladders_df, chutes_df,
+         games_df, games_by_track_df) = sm.prep_joined_moves_df(self.moves, self.board.tracks)
 
-        # set up chutes & ladder df's if none defined in input
-        if ladders_df.columns is None or len(ladders_df.columns) == 0:
-            ladders_df = pd.DataFrame(columns=['track', 'start_l', 'end_l'])
-        else:
-            ladders_df.rename(columns={"start": "start_l", "end": "end_l"}, inplace=True)
-        if chutes_df.columns is None or len(chutes_df.columns) == 0:
-            chutes_df = pd.DataFrame(columns=['track', 'start_c', 'end_c'])
-        else:
-            chutes_df.rename(columns={"start": "start_c", "end": "end_c"}, inplace=True)
-        if events_df.columns is None or len(events_df.columns) == 0:
-            events_df = pd.DataFrame(columns=['track', 'start_e', 'end_e'])
-        else:
-            events_df.rename(columns={"start": "start_e", "end": "end_e"}, inplace=True)
+        (self.soexcitespeggingbytrack, self.soexcitespegging,
+         self.repeatsbytrack, self.repeats) = sm.calc_soexcites_and_repeats(joined_df, self.config.numtrials)
 
-        # TODO: get indexing working in pandas
-        # moves_df.set_index(['track', 'currpos'], inplace=True, drop=False)
-        # moves_df.index.name = 'idx_track_currpos'
-        # moves_df.set_index(['trial', 'track', 'player', 'movenum'], inplace=True, drop=False)
-        # moves_df.index.name = 'idx_main'
-        # ladders_df.set_index(['track', 'end_l'], inplace=True, drop=False)
-        # ladders_df.index.name = 'idx_main'
-        # chutes_df.set_index(['track', 'end_c'], inplace=True, drop=False)
-        # chutes_df.index.name = 'idx_main'
-        # events_df.set_index(['track', 'end_e'], inplace=True, drop=False)
-        # events_df.index.name = 'idx_main'
-        #
-        # moves_df.sort_index(inplace=True)
-        # ladders_df.sort_index(inplace=True)
-        # chutes_df.sort_index(inplace=True)
-        # events_df.sort_index(inplace=True)
+        self.avglengthinrounds = sm.calc_avg_length_in_rounds(joined_df, self.config.numtrials)
 
-        moves_df.sort_values(['trialmux', 'track', 'player', 'movenum'], inplace=True)
-        ladders_df.sort_values(['track', 'end_l'], inplace=True)
-        chutes_df.sort_values(['track', 'end_c'], inplace=True)
-        events_df.sort_values(['track', 'end_e'], inplace=True)
+        (self.chutesbytrack, self.laddersbytrack, self.eventsbytrack,
+         self.chutes, self.ladders, self.events) = sm.calc_events_by_track(joined_df, self.config.numtrials)
 
-        # Join into data analytics tables
-        joined_df = pd.merge(moves_df, ladders_df, left_on=['track', 'currpos'], right_on=['track', 'end_l'],
-                             how='left')
-        joined_df = pd.merge(joined_df, chutes_df, left_on=['track', 'currpos'], right_on=['track', 'end_c'],
-                             how='left')
-        joined_df = pd.merge(joined_df, events_df, left_on=['track', 'currpos'], right_on=['track', 'end_e'],
-                             how='left').reset_index()
-        # joined_df.set_index(['trialmux', 'track', 'player', 'movenum'], inplace=True, drop=False)
+        self.hist_df, self.hist_by_track_df = sm.calc_move_histograms(joined_df, games_df, games_by_track_df)
 
-        # Rollup into game & track-level stats
-        # NOTE: include columns needed at game level in spec
-        games_df = joined_df[['trialmux']].assign(moves=1).groupby('trialmux').agg('sum').reset_index()
-        games_by_track_df = (joined_df[['trialmux', 'track']].assign(moves=1).groupby(['trialmux', 'track']).agg('sum')
-                             .reset_index())
-
-        # Compute game & track-level stats
-        self.soexcitespeggingbytrack = [float(e) / float(self.config.numtrials) for e in
-                                        ((joined_df.query('soexcite == True'))[['track']]
-                                         .assign(moves=1).groupby(['track'])
-                                         .agg('sum')['moves'].to_list())]
-        self.soexcitespegging = sum(self.soexcitespeggingbytrack)
-        self.repeatsbytrack = ([float(r) / float(self.config.numtrials) for r in joined_df.query('not end_e.isnull()')
-        [['trialmux', 'track', 'eventhit']].assign(hits=1).groupby(['trialmux', 'track', 'eventhit']).agg('sum')
-        .query('hits > 1').assign(repeats=1).groupby(['track']).agg('sum')['repeats'].to_list()])
-        self.repeats = sum(self.repeatsbytrack)
-
-        self.avglengthinrounds = (float(sum(joined_df[['trialmux', 'round']].groupby(['trialmux']).agg('max')['round']
-                                            .to_list())) / float(self.config.numtrials))
-
-        self.chutesbytrack = ([float(c) / float(self.config.numtrials) for c in joined_df[['track', 'end_c']]
-        .dropna().assign(chutes=1).groupby(['track']).agg('sum').sort_values(['track'])['chutes'].to_list()])
-        self.laddersbytrack = ([float(l) / float(self.config.numtrials) for l in joined_df[['track', 'end_l']]
-        .dropna().assign(ladders=1).groupby(['track']).agg('sum').sort_values(['track'])['ladders'].to_list()])
-        self.eventsbytrack = [l + c for (l, c) in zip(self.laddersbytrack, self.chutesbytrack)]
-        self.ladders = sum(self.laddersbytrack)
-        self.chutes = sum(self.chutesbytrack)
-        self.events = sum(self.eventsbytrack)
-
-        # Build histagrams of events
-        # NOTE: stripping out columns from joined_df so doesn't wipe all records on dropna
-        raw_hist_df = (pd.merge(games_df, joined_df[['end_e', 'trialmux', 'ladderorchuteamt', 'movenum']].reset_index(),
-                                on=['trialmux'], suffixes=('_sum', '')).dropna())
-        raw_hist_df['normmove'] = raw_hist_df['movenum'] / raw_hist_df['moves']
-        # self.hist_df = raw_hist_df[['normmove', 'ladderorchuteamt']].set_index(['normmove']).sort_index()
-        self.hist_df = raw_hist_df[['normmove', 'ladderorchuteamt']].sort_values(['normmove'])
-        raw_hist_by_track_df = (pd.merge(games_by_track_df, joined_df[['end_e', 'trialmux', 'track',
-                                                                       'ladderorchuteamt', 'movenum']].reset_index(),
-                                         on=['trialmux', 'track'], suffixes=('_sum', '')).dropna())
-        raw_hist_by_track_df['normmove'] = raw_hist_by_track_df['movenum'] / raw_hist_by_track_df['moves']
-        # self.hist_by_track_df = (raw_hist_by_track_df[['track', 'normmove', 'ladderorchuteamt']]
-        #                     .set_index(['track', 'normmove']).sort_index())
-        self.hist_by_track_df = (raw_hist_by_track_df[['track', 'normmove', 'ladderorchuteamt']]
-                                 .sort_values(['track', 'normmove']))
-
-        # Build look forward events dataframes
-        laddersin1_df = pd.merge(moves_df, ladders_df, left_on=['track', 'posin1'], right_on=['track', 'start_l'])
-        chutesin1_df = pd.merge(moves_df, chutes_df, left_on=['track', 'posin1'], right_on=['track', 'start_c'])
-        laddersin2_df = pd.merge(moves_df, ladders_df, left_on=['track', 'posin2'], right_on=['track', 'start_l'])
-        chutesin2_df = pd.merge(moves_df, chutes_df, left_on=['track', 'posin2'], right_on=['track', 'start_c'])
-
-        laddersin1_df.sort_values(['track', 'trialmux'])
-        chutesin1_df.sort_values(['track', 'trialmux'])
-        laddersin2_df.sort_values(['track', 'trialmux'])
-        chutesin2_df.sort_values(['track', 'trialmux'])
-
-        self.laddersin1bytrack = ([float(i) / float(self.config.numtrials) for i in
-                                   (laddersin1_df.groupby(['track', 'trialmux']).size().reset_index(name='counts').
-                                    groupby('track').agg('sum')['counts'].to_list())])
-        self.laddersin2bytrack = ([float(i) / float(self.config.numtrials) for i in
-                                   (laddersin2_df.groupby(['track', 'trialmux']).size().reset_index(name='counts').
-                                    groupby('track').agg('sum')['counts'].to_list())])
-        self.chutesin1bytrack = ([float(i) / float(self.config.numtrials) for i in
-                                  (chutesin1_df.groupby(['track', 'trialmux']).size().reset_index(name='counts').
-                                   groupby('track').agg('sum')['counts'].to_list())])
-        self.chutesin2bytrack = ([float(i) / float(self.config.numtrials) for i in
-                                  (chutesin2_df.groupby(['track', 'trialmux']).size().reset_index(name='counts').
-                                   groupby('track').agg('sum')['counts'].to_list())])
-        self.eventsin1bytrack = [l + c for l, c in zip(self.laddersin1bytrack, self.chutesin1bytrack)]
-        self.eventsin2bytrack = [l + c for l, c in zip(self.laddersin2bytrack, self.chutesin2bytrack)]
-        self.laddersin1 = sum(self.laddersin1bytrack)
-        self.laddersin2 = sum(self.laddersin2bytrack)
-        self.chutesin1 = sum(self.chutesin1bytrack)
-        self.chutesin2 = sum(self.chutesin2bytrack)
-        self.eventsin1 = self.laddersin1 + self.chutesin1
-        self.eventsin2 = self.laddersin2 + self.chutesin2
+        (self.laddersin1bytrack, self.laddersin2bytrack, self.chutesin1bytrack, self.chutesin2bytrack,
+         self.eventsin1bytrack, self.eventsin2bytrack, self.laddersin1, self.laddersin2,
+         self.chutesin1, self.chutesin2, self.eventsin1, self.eventsin2) = (
+            sm.calc_lookforward_events_by_track(moves_df, ladders_df, chutes_df, self.config.numtrials))
 
     def buildSet4PlusInsertSnippet(self, partialSet, overall=None, end=False):
         """

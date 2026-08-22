@@ -283,6 +283,62 @@ extensions). `pytest -m integration` is the rest.
     branch doesn't populate `Track.Track_ID` (only findmode does), so
     this keys Optimizer params by `track.num` -- documented in the file
     since it's the kind of thing a real call site would trip over too.
+- `test_stats_metrics.py`, `test_evaluator_metrics.py` -- Refactor Mk II
+  ([[Refactor Mk ii]] in the Obsidian vault), Phase 6, done. `Stats.
+  calc_metrics()` (137 lines) and `Evaluator.detMetrics()` (193 lines)
+  were both linear "compute one named statistic, write it to `self.*`
+  or append it to `self.results`, repeat" pipelines with close to zero
+  direct test coverage of any individual statistic -- Phase 4
+  characterized two pre-existing `Stats` bugs rather than fixing them
+  specifically because the method was too big to safely touch. Each
+  named block in both methods is now its own function taking exactly
+  the DataFrame(s)/inputs it needs instead of reading `self.board`/
+  `self.moves` directly, same pattern as the existing `hydrate_tracks_
+  from_dataframes`/`hydrate_candidate_events_from_dataframe`/`build_
+  insert_stat_stub` extractions. Both `calc_metrics()` and `detMetrics()`
+  are now thin orchestrators -- pure code motion, no logic changed, and
+  every pre-existing black-box test in `test_stats.py`/`test_evaluator.py`
+  still passes unchanged.
+  - `cribsandladders/stats_metrics.py` -- `prep_joined_moves_df` (the
+    DataFrame-building/joining preamble) plus `calc_soexcites_and_
+    repeats`, `calc_avg_length_in_rounds`, `calc_events_by_track`,
+    `calc_move_histograms`, `calc_lookforward_events_by_track`. All
+    pure functions of already-built DataFrames, tested in
+    `test_stats_metrics.py` against small scenarios built from real
+    `Move`/`Track`/`Chute`/`Ladder` objects (the same way
+    `test_stats.py` already does) rather than hand-built raw
+    DataFrames -- `prep_joined_moves_df`'s output shape depends on
+    which columns exist at all, which isn't worth hand-guessing when
+    building it from real domain objects is one function call. Found
+    (and characterized, not fixed) one more pre-existing quirk along
+    the way: `eventsin1bytrack`/`eventsin2bytrack` are built via
+    `zip(laddersinNbytrack, chutesinNbytrack)`, which silently
+    truncates to the *shorter* list whenever only ladders or only
+    chutes have any per-track hits at all -- so the by-track list can
+    under-report even though the independently-computed scalar total
+    (`eventsin1`/`eventsin2`) stays correct. See
+    `test_calc_lookforward_events_by_track_counts_ladder_starting_
+    one_space_ahead`'s comment.
+  - `cribsandladders/evaluator_metrics.py` -- `structure_scalar_stats`,
+    `early_termination_stats`, `balance_stats`, `gamelength_stat`,
+    `twohits_stat`, `soexcite_stat`, `repeats_stat`,
+    `events_hit_skew_stat`, `event_length_distribution_stats`. All pure
+    functions -- no `self`, no `EventSetBuilder` needed -- tested
+    directly in `test_evaluator_metrics.py` with small fakes. Five
+    blocks (`eventSpacingHist_curvefit`, the onlyGameBoardStats-only
+    `trackEventLengthDistribution_curvefit_T*`, and the three
+    `*OverTime_curvefit` results) still need `Evaluator.
+    processActualHistCurve`/`Evaluator.discreteRegression`, which
+    delegate to `self.eventSetBuilder`'s curve-math methods -- those
+    became named private methods on `Evaluator`
+    (`_event_spacing_histogram_result` etc.) instead of moving to
+    `evaluator_metrics.py`, since doing that properly would mean either
+    passing the whole `EventSetBuilder` through as a parameter or
+    duplicating its curve-math delegation. Flagged in both modules'
+    docstrings as a reasonable follow-up: `Evaluator` could call
+    `cribsandladders.event_curve_math` directly instead of proxying
+    through `self.eventSetBuilder`, since that's exactly what
+    `EventSetBuilder`'s own delegating wrappers already do.
 
 ## Fixtures
 

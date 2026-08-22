@@ -1,10 +1,10 @@
 # TODO: ensure all the following are evaluated: balance, # distribution of events, # regression fitting of events over time to ideal curve, # fit of the other curves, # game length (maybe allow chute cancelling), # 2-hits (maybe fit curve?), # So excite, # repeats, # minimize othos, # maximize multis
-import statistics as stt
 import math
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 from cribsandladders.config import GameConfig, DEFAULT_CONFIG
+from cribsandladders import evaluator_metrics as em
 
 # NOTE: scipy.optimize.minimize is imported lazily inside
 # CurveOptimizer.find_optimal_scale (the only place it's used) instead
@@ -55,47 +55,73 @@ class Evaluator:
         """
         Calculates all board and gameplay metrics.
 
+        Thin orchestrator (Refactor Mk II, Phase 6) -- see
+        cribsandladders/evaluator_metrics.py for the self-contained
+        per-result-block logic, and the private `_*_result(s)` methods
+        below for the handful of blocks that still need
+        `self.eventSetBuilder`'s curve-math delegation. This used to be
+        one 193-line method appending result dicts inline throughout;
+        calls run in the same order the original inline code did and no
+        behavior changed -- see evaluator_metrics.py's module docstring
+        for details.
+
         Args:
             onlyGameBoardStats (bool): If True, skips simulation-based gameplay stats.
         """
         # GAME BOARD STRUCTURE SCALAR STATS
-        if self.eventSetBuilder.events > 0:
-            orthos = abs(self.config.optorthospct - self.eventSetBuilder.orthos / self.eventSetBuilder.events)
-            orthosit = self.config.optorthospct - self.eventSetBuilder.orthos / self.eventSetBuilder.events
-        else:
-            orthos, orthosit = self.config.optorthospct, self.config.optorthospct
-        self.results.append(dict(Result = "orthos", ResultFlavour = "GAME BOARD STRUCTURE SCALAR STATS",
-                                 ResultValue = orthos, ResultValueIterative = orthosit, Weighting = 0.5))
-
-        if self.eventSetBuilder.events > 0:
-            multis = abs(self.config.optmultispct - self.eventSetBuilder.multis / self.eventSetBuilder.events)
-            multisit = self.config.optmultispct - self.eventSetBuilder.multis / self.eventSetBuilder.events
-        else:
-            multis, multisit = self.config.optmultispct, self.config.optmultispct
-        self.results.append(dict(Result = "multis", ResultFlavour = "GAME BOARD STRUCTURE SCALAR STATS",
-                                 ResultValue = multis, ResultValueIterative = multisit, Weighting = 1))
-
-        if self.eventSetBuilder.events > 0:
-            cancels = (self.eventSetBuilder.cancels / self.eventSetBuilder.events) - self.config.idealcancelspct
-            # If too few cancels, don't sweat it, muchks with iter model
-            if cancels < 0:
-                cancels = 0
-        else:
-            cancels = 0
-        self.results.append(dict(Result = "cancels", ResultFlavour = "GAME BOARD STRUCTURE SCALAR STATS",
-                                 ResultValue = cancels, Weighting = 5))
-
-        for n in self.eventSetBuilder.eventNodesByTrack:
-            track = self.board.getTrackByNum(n['tracknum'])
-            track_id = track.Track_ID
-            maxNode = max(n['nodes'])
-            termPct = min(maxNode / (track.length - self.config.finishlinelength), 1.0)
-            self.results.append(dict(Result = "earlytermination_T{}".format(track_id), ResultFlavour = "GAMEPLAY SCALAR STATS",
-                                     ResultValue = 1.0 - termPct, Weighting = 8))
+        self.results.extend(em.structure_scalar_stats(
+            self.eventSetBuilder.events, self.eventSetBuilder.orthos,
+            self.eventSetBuilder.multis, self.eventSetBuilder.cancels, self.config))
+        self.results.extend(em.early_termination_stats(
+            self.eventSetBuilder.eventNodesByTrack, self.board, self.config))
 
         # GAME BOARD STRUCTURE STATISTIC STATS
+        self.results.append(self._event_spacing_histogram_result())
 
-        # EVENT SPACING HISTOGRAM
+        if onlyGameBoardStats:
+            # Event length track distribution as histogram
+            # Only do this if in prelim track eval mode, since better appraised by gameplay stat below
+            self.results.extend(self._track_event_length_distribution_results())
+
+        if not onlyGameBoardStats:
+            # GAMEPLAY SCALAR STATS
+
+            # Balance OMITING FROM EVAL SINCE DEALT W/ IN SETTER
+            self.results.extend(em.balance_stats(self.stats.partialBalanceSet, self.board))
+
+            # Game length OMITING FROM EVAL SINCE DEALT W/ IN SETTER
+            self.results.append(em.gamelength_stat(self.stats.avglengthinrounds, self.config))
+
+            self.results.append(em.twohits_stat(self.moves, self.board.tracks, self.config))
+
+            # Calculate so-excites (maximize)
+            self.results.append(em.soexcite_stat(self.stats.soexcitespegging))
+
+            # Calculate repeats (minimize)
+            self.results.append(em.repeats_stat(self.stats.repeats, len(self.moves)))
+
+            # Calculate skew of chutes or ladders hit as compared to tot # events hit
+            self.results.append(em.events_hit_skew_stat(self.moves))
+
+            # GAMEPLAY STATISTICAL STATS (lol)
+            moves_df = pd.DataFrame.from_records([dict(movenum = m.movenum, trial = m.trial) for m in self.moves])
+            movesPerTrial_df = moves_df[['trial']].assign(moves = 1).groupby('trial').agg('sum').reset_index()
+            movesPerTrial_df.sort_values(['trial'])
+
+            self.results.append(self._events_over_time_result(movesPerTrial_df))
+            self.results.append(self._energy_over_time_result(movesPerTrial_df))
+            self.results.append(self._velocity_over_time_result(movesPerTrial_df))
+
+            # Event length distribution as histogram (+ per-track bottom-heavy check)
+            self.results.extend(em.event_length_distribution_stats(
+                self.moves, self.board.tracks, self.processActualHistCurve, self.discreteRegression, self.config))
+
+    def _event_spacing_histogram_result(self):
+        """The 'EVENT SPACING HISTOGRAM' block of detMetrics -- needs
+        self.processActualHistCurve/self.discreteRegression (which
+        delegate to self.eventSetBuilder's curve-math methods), so it
+        stays a method rather than moving to evaluator_metrics.py. See
+        that module's docstring for why."""
         spacingsRaw_l = []
         for nds in self.eventSetBuilder.eventNodesByTrack:
             prvNode = 0
@@ -108,142 +134,64 @@ class Evaluator:
                                              spacingsHist_l)
         else:
             result = 1
-        self.results.append(dict(Result = "eventSpacingHist_curvefit", ResultFlavour = "GAME BOARD STRUCTURE STATISTIC STATS",
-                                 ResultValue = result, Weighting = 15))
+        return dict(Result = "eventSpacingHist_curvefit", ResultFlavour = "GAME BOARD STRUCTURE STATISTIC STATS",
+                   ResultValue = result, Weighting = 15)
 
-        if onlyGameBoardStats:
-            # Event length track distribution as histogram
-            # Only do this if in prelim track eval mode, since better appraised by gameplay stat below
-            for t in self.board.tracks:
-                eventsLengthHist_l = self.processActualHistCurve([e.length for e in t.eventSetBuild])
-                if len(eventsLengthHist_l) == 0:
-                    result = 1
-                else:
-                    result = self.discreteRegression(self.config.eventlengthdisthistcurvefile, eventsLengthHist_l)
-                self.results.append(dict(Result = "trackEventLengthDistribution_curvefit_T{}".format(t.Track_ID),
-                                         ResultFlavour = "GAME BOARD STRUCTURE STATISTIC STATS",
-                                         ResultValue = result, Weighting = 8))
-
-        if not onlyGameBoardStats:
-            # GAMEPLAY SCALAR STATS
-
-            # Balance OMITING FROM EVAL SINCE DEALT W/ IN SETTER
-            self.results.append(dict(Result = "balance", ResultFlavour = "GAMEPLAY SCALAR STATS",
-                                     ResultValue = stt.stdev([b[1] for b in self.stats.partialBalanceSet]), Weighting = 0))
-            for b in self.stats.partialBalanceSet:
-                track_id = self.board.getTrackByNum(b[0]).Track_ID
-                self.results.append(dict(Result = "balance_T{}".format(track_id), ResultFlavour = "GAMEPLAY SCALAR STATS",
-                                         ResultValue = b[1], Weighting = 0))
-
-            # Game length OMITING FROM EVAL SINCE DEALT W/ IN SETTER
-            if self.config.idealgamelength > 0:
-                gamelengthstatit = (self.stats.avglengthinrounds - self.config.idealgamelength) / self.config.idealgamelength
-            else:
-                gamelengthstatit = 1
-
-            self.results.append(dict(Result = "gamelength", ResultFlavour = "GAMEPLAY SCALAR STATS",
-                                     ResultValue = abs(gamelengthstatit), ResultValueIterative = gamelengthstatit, Weighting = 0))
-
-            # Calculate two-hits
-            trackNumChecks = []
-            for t in self.board.tracks:
-                trackNumChecks.append(dict(tracknum = t.num, prevwasevent = False))
-
-            twoHits = []
-            for m in self.moves:
-                curTrack = None
-                for tn in trackNumChecks:
-                    if tn['tracknum'] == m.track:
-                        curTrack = tn
-                        break
-                if m.hasEvent:
-                    if curTrack['prevwasevent']:
-                        twoHits.append(dict(tracknum = curTrack['tracknum'], movenum = m.movenum))
-                    curTrack['prevwasevent'] = True
-                else:
-                    curTrack['prevwasevent'] = False
-
-            if len(self.moves) > 0:
-                twohitsstatit = len(twoHits) / len(self.moves) - self.config.opttwohitspct
-            else:
-                twohitsstatit = 1
-            self.results.append(dict(Result = "twohits", ResultFlavour = "GAMEPLAY SCALAR STATS",
-                                     ResultValue = abs(twohitsstatit), ResultValueIterative = twohitsstatit, Weighting = 30))
-
-            # Calculate so-excites (maximize)
-            self.results.append(dict(Result = "soexcite", ResultFlavour = "GAMEPLAY SCALAR STATS",
-                                     ResultValue = 1.0 / self.stats.soexcitespegging if self.stats.soexcitespegging > 0.1 else 1.0,
-                                     Weighting = 0.1))
-
-            # Calculate repeats (minimize)
-            self.results.append(dict(Result = "repeats", ResultFlavour = "GAMEPLAY SCALAR STATS",
-                                     ResultValue = self.stats.repeats / len(self.moves) if len(self.moves) > 0 else 1,
-                                     Weighting = 400))
-
-            # Calculate skew of chutes or ladders hit as compared to tot # events hit
-            laddersHit = len([m for m in self.moves if m.hasEvent and m.ladderorchuteamt > 0])
-            chutesHit = len([m for m in self.moves if m.hasEvent and m.ladderorchuteamt < 0])
-            skewEvents = 0 if laddersHit + chutesHit == 0 else abs(laddersHit - chutesHit) / (laddersHit + chutesHit)
-            self.results.append(dict(Result = "eventshitskew", ResultFlavour = "GAMEPLAY SCALAR STATS",
-                                     ResultValue = skewEvents, Weighting = 1))
-
-            # GAMEPLAY STATISTICAL STATS (lol)
-            moves_df = pd.DataFrame.from_records([dict(movenum = m.movenum, trial = m.trial) for m in self.moves])
-            movesPerTrial_df = moves_df[['trial']].assign(moves = 1).groupby('trial').agg('sum').reset_index()
-            movesPerTrial_df.sort_values(['trial'])
-
-            # Events over time
-            eventsOverTime_df = pd.DataFrame.from_records([dict(movenum = m.movenum, hasevent = 1 if m.hasEvent else 0,
-                                                                trial = m.trial) for m in self.moves])
-            if len(eventsOverTime_df) == 0:
-                result = 1
-            else:
-                eventsOverTime_l = self.processActualTimeCurve(movesPerTrial_df, eventsOverTime_df, "hasevent")
-                result = self.discreteRegression(self.config.eventsovertimecurvefile, eventsOverTime_l, smoothing = 0.7)
-            self.results.append(dict(Result = "eventsOverTime_curvefit", ResultFlavour = "GAMEPLAY STATISTICAL STATS (lol)",
-                                     ResultValue = result, Weighting = 20))
-
-            # Energy over time
-            energyOverTime_df = pd.DataFrame.from_records([dict(movenum = m.movenum, eventmag = abs(m.ladderorchuteamt),
-                                                                trial = m.trial) for m in self.moves])
-            if len(energyOverTime_df) == 0:
-                result = 1
-            else:
-                eventsOverTime_l = self.processActualTimeCurve(movesPerTrial_df, energyOverTime_df, "eventmag")
-                result = self.discreteRegression(self.config.eventenergyfile, eventsOverTime_l, smoothing = 0.6)
-            self.results.append(dict(Result = "energy_curvefit", ResultFlavour = "GAMEPLAY STATISTICAL STATS (lol)",
-                                     ResultValue = result, Weighting = 14))
-
-            # Velocity over time
-            velocityOverTime_df = pd.DataFrame.from_records([dict(movenum = m.movenum, score = m.score,
-                                                                  trial = m.trial) for m in self.moves])
-            if len(velocityOverTime_df) == 0:
-                result = 1
-            else:
-                velocityOverTime_l = self.processActualTimeCurve(movesPerTrial_df, velocityOverTime_df, "score")
-                # Smooth, since we want to curve match general trends
-                result = self.discreteRegression(self.config.velocityovertimecurvefile, velocityOverTime_l, smoothing = 0.6)
-            self.results.append(dict(Result = "velocity_curvefit", ResultFlavour = "GAMEPLAY STATISTICAL STATS (lol)",
-                                     ResultValue = result, Weighting = 4))
-
-            # Event length distribution as histogram
-            eventsLengthHist_l = self.processActualHistCurve([abs(m.ladderorchuteamt) for m in self.moves if m.hasEvent])
+    def _track_event_length_distribution_results(self):
+        """The onlyGameBoardStats-only 'Event length track distribution'
+        block. Same curve-math-delegation reason as
+        _event_spacing_histogram_result for staying a method."""
+        results = []
+        for t in self.board.tracks:
+            eventsLengthHist_l = self.processActualHistCurve([e.length for e in t.eventSetBuild])
             if len(eventsLengthHist_l) == 0:
                 result = 1
             else:
                 result = self.discreteRegression(self.config.eventlengthdisthistcurvefile, eventsLengthHist_l)
-            self.results.append(dict(Result = "eventsHitLengthDistribution_curvefit",
-                                     ResultFlavour = "GAMEPLAY STATISTICAL STATS (lol)",
-                                     ResultValue = result, Weighting = 10))
+            results.append(dict(Result = "trackEventLengthDistribution_curvefit_T{}".format(t.Track_ID),
+                               ResultFlavour = "GAME BOARD STRUCTURE STATISTIC STATS",
+                               ResultValue = result, Weighting = 8))
+        return results
 
-            # If more than 50% of events are between 2 & 4 spaces, penalize (track-wise)
-            for t in self.board.tracks:
-                tracksByLength_l = [abs(m.ladderorchuteamt) for m in self.moves if (m.hasEvent and m.track == t.num)]
-                shortTracks_l = [e for e in tracksByLength_l if e <= 4]
-                if len(tracksByLength_l) > 0 and len(shortTracks_l) * 2 > len(tracksByLength_l):
-                    self.results.append(dict(Result = "eventsHitLengthDistribution_bottomheavy_T{}".format(t.Track_ID),
-                                             ResultFlavour = "GAMEPLAY STATISTICAL STATS (lol)",
-                                             ResultValue = len(shortTracks_l) / len(tracksByLength_l) - 0.5, Weighting = 10))
+    def _events_over_time_result(self, movesPerTrial_df):
+        """'Events over time' curve fit. Same curve-math-delegation
+        reason as _event_spacing_histogram_result for staying a method."""
+        eventsOverTime_df = pd.DataFrame.from_records([dict(movenum = m.movenum, hasevent = 1 if m.hasEvent else 0,
+                                                            trial = m.trial) for m in self.moves])
+        if len(eventsOverTime_df) == 0:
+            result = 1
+        else:
+            eventsOverTime_l = self.processActualTimeCurve(movesPerTrial_df, eventsOverTime_df, "hasevent")
+            result = self.discreteRegression(self.config.eventsovertimecurvefile, eventsOverTime_l, smoothing = 0.7)
+        return dict(Result = "eventsOverTime_curvefit", ResultFlavour = "GAMEPLAY STATISTICAL STATS (lol)",
+                   ResultValue = result, Weighting = 20)
+
+    def _energy_over_time_result(self, movesPerTrial_df):
+        """'Energy over time' curve fit. Same curve-math-delegation
+        reason as _event_spacing_histogram_result for staying a method."""
+        energyOverTime_df = pd.DataFrame.from_records([dict(movenum = m.movenum, eventmag = abs(m.ladderorchuteamt),
+                                                            trial = m.trial) for m in self.moves])
+        if len(energyOverTime_df) == 0:
+            result = 1
+        else:
+            eventsOverTime_l = self.processActualTimeCurve(movesPerTrial_df, energyOverTime_df, "eventmag")
+            result = self.discreteRegression(self.config.eventenergyfile, eventsOverTime_l, smoothing = 0.6)
+        return dict(Result = "energy_curvefit", ResultFlavour = "GAMEPLAY STATISTICAL STATS (lol)",
+                   ResultValue = result, Weighting = 14)
+
+    def _velocity_over_time_result(self, movesPerTrial_df):
+        """'Velocity over time' curve fit. Same curve-math-delegation
+        reason as _event_spacing_histogram_result for staying a method."""
+        velocityOverTime_df = pd.DataFrame.from_records([dict(movenum = m.movenum, score = m.score,
+                                                              trial = m.trial) for m in self.moves])
+        if len(velocityOverTime_df) == 0:
+            result = 1
+        else:
+            velocityOverTime_l = self.processActualTimeCurve(movesPerTrial_df, velocityOverTime_df, "score")
+            # Smooth, since we want to curve match general trends
+            result = self.discreteRegression(self.config.velocityovertimecurvefile, velocityOverTime_l, smoothing = 0.6)
+        return dict(Result = "velocity_curvefit", ResultFlavour = "GAMEPLAY STATISTICAL STATS (lol)",
+                   ResultValue = result, Weighting = 4)
 
     def processActualTimeCurve(self, movesPerTrial_df, curve_df, y_field):
         """Discretizes and normalizes gameplay data over a standardized time curve."""
