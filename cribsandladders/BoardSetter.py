@@ -119,6 +119,21 @@ def hydrate_tracks_from_dataframes(board, boardAndTracks_df, chutes_df, ladders_
         config (GameConfig): only config.twodecks is read, to decide
             whether a track's efflength uses its two-deck or
             single-deck length.
+
+    TODO(liam): flagged by
+    tests/test_integration_board_optimizer.py (module docstring). This
+    function reads `track_sr['Track_ID']` below (to query that track's
+    chutes/ladders out of chutes_df/ladders_df) but never assigns it
+    onto `curtrack.Track_ID` -- so every `Track` built via this
+    (non-findmode) path is left with `Track_ID == 0` (Track's
+    `__init__` default), unlike the findmode branch of
+    `setBoardFromDb`, which does set it (from a fresh INSERT or an
+    existing stub row). Any downstream code that assumes `Track_ID` is
+    always populated (e.g. keying `Optimizer` params by track) will
+    silently misbehave for boards loaded this way; real call sites
+    currently have to fall back to `track.num` instead. Not fixed yet
+    since board-identity semantics (is `Track_ID` supposed to be
+    optional here, or is this a real gap?) need deciding first.
     """
     # set track-level info
     batch_ladders = []

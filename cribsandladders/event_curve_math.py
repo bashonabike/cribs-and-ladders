@@ -136,6 +136,17 @@ def discretize_curve(curve, numBuckets, accumulate=False):
         Discretized curve as a list of (bucket, value) pairs.
     """
     # If accumulating, NORMALIZE AFTER!!!
+    # TODO(liam): PRE-EXISTING BUG, caught by
+    # tests/test_event_curve_math.py::test_discretize_curve_accumulating_is_lagged_by_one_bucket.
+    # The `while curveIdx < i * discFactor` boundary check below advances
+    # curveIdx up to (but not including) the start of bucket i's own
+    # span, so accum_y for bucket i only ever picks up whatever's left
+    # over from the *previous* bucket's advancement -- the accumulation
+    # is lagged by one bucket. Concretely: bucket 0 always comes out
+    # 0.0 regardless of the curve's actual values, and every later
+    # bucket reflects the curve one bucket behind where a straightforward
+    # reading of this loop would expect. Not fixed yet; see the test for
+    # the full characterization.
     discretized_curve = []
     curveIdx = 0
     discFactor = len(curve) / numBuckets
@@ -227,6 +238,17 @@ def index_start_of_each_hole_in_cands(holes, trackEventOverview):
     Note:
         Modifies the trackEventOverview dictionary in-place to add a 'candeventstartlookup' key
         containing the index mapping.
+
+    TODO(liam): flagged by
+    tests/test_event_curve_math.py::test_index_start_of_each_hole_in_cands_builds_lookup_in_place.
+    This function has zero call sites anywhere in the repo (confirmed by
+    grep) -- it's dead code as of this writing. Its own body also
+    implies `trackEventOverview` must be a `dict` keyed by both
+    sequential ints (0..n-1, read via `trackEventOverview[candEventCursor]`)
+    *and* the string 'candeventstartlookup' this function adds at the
+    end -- an inferred contract, not a documented one, since there's no
+    real caller to confirm it against. Worth confirming intent (revive
+    the call site, or delete this) before relying on it.
     """
     candEventCursor = 0
     candEventCursorStartLookups = [-1] * len(holes)

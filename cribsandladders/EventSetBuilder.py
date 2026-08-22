@@ -1433,6 +1433,21 @@ class EventSetBuilder:
         Note:
             This method modifies the board state in-place by adding events to tracks.
             If generation fails, it may adjust parameters and retry automatically.
+
+        TODO(liam): flagged by
+        tests/test_eventsetbuilder.py::TestEventSetBuilder::test_try_event_set
+        (skipped, not asserted). This method immediately dereferences
+        `t.candidateEvents.candidateEvents` for every track in
+        `self.board.tracks` -- it requires each track to already have a
+        real `CandidateEvents` instance (built by
+        `PossibleEvents.buildSet`) populated with actual `CandidateEvent`
+        objects. Nothing in this method's signature or docstring
+        documents that precondition; a track with `candidateEvents is
+        None` (e.g. a bare `Track()` built for a test, or a board loaded
+        without running `PossibleEvents` first) will crash here rather
+        than failing with a clear error. Worth either asserting the
+        precondition explicitly or documenting it, and building a real
+        fixture for the skipped test above.
         """
 
         start_time = time.time()

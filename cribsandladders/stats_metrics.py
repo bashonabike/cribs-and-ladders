@@ -171,6 +171,18 @@ def calc_lookforward_events_by_track(moves_df, ladders_df, chutes_df, numtrials)
     chutesin2bytrack = ([float(i) / float(numtrials) for i in
                          (chutesin2_df.groupby(['track', 'trialmux']).size().reset_index(name='counts').
                           groupby('track').agg('sum')['counts'].to_list())])
+    # TODO(liam): PRE-EXISTING BUG (carried over verbatim from the
+    # original inline calc_metrics code), caught by
+    # tests/test_stats_metrics.py::test_calc_lookforward_events_by_track_counts_ladder_starting_one_space_ahead.
+    # zip() truncates to the *shorter* of the two lists, so whenever
+    # only ladders (or only chutes) register any per-track hits at all,
+    # the corresponding *bytrack list below silently comes out shorter
+    # than it should (often []) instead of reflecting the ladder-only or
+    # chute-only values -- even though the independently-computed scalar
+    # totals (eventsin1/eventsin2 below, = laddersinN + chutesinN) stay
+    # correct. So the by-track breakdown can under-report relative to
+    # the correct scalar total. Not fixed yet; see the test for the full
+    # characterization.
     eventsin1bytrack = [l + c for l, c in zip(laddersin1bytrack, chutesin1bytrack)]
     eventsin2bytrack = [l + c for l, c in zip(laddersin2bytrack, chutesin2bytrack)]
     laddersin1 = sum(laddersin1bytrack)

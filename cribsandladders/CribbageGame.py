@@ -314,6 +314,16 @@ class CribbageGame:
 
         # If run build is seq, ordered or not, the diff of max and min should be the size minus 1
         # Eg: "7, 9, 8" min is 7, max is 9, diff is 2 which is len - 1
+        # TODO(liam): PRE-EXISTING BUG, caught by
+        # tests/test_cribbage_game.py::test_score_pegging_awards_a_point_for_a_single_card_go.
+        # When only one card has been played in the current Go (len(seq)
+        # == 1), the loop above never runs (range(1, 1) is empty), so
+        # runBuild is left as [card.rank] (length 1) and the check below
+        # trivially holds (runMax - runMin == 0 == len(runBuild) - 1),
+        # awarding +1 point for a "run" of a single card. A real run
+        # needs >= 3 cards -- this scores a bogus point on every single
+        # first play of a Go. Not fixed yet; see the test for the full
+        # characterization.
         if len(runBuild) > 0 and runMax - runMin == len(runBuild) - 1:
             pegScore += len(runBuild)
         if len(ofAKindBuild) > 1:
