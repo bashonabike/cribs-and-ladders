@@ -30,7 +30,6 @@
 
 import matplotlib.path as mpath
 import numpy as np
-import matplotlib.pyplot as plt
 import math
 import copy as cp
 import sqlite3 as sql
@@ -239,171 +238,209 @@ class PossibleEvents:
                     if not self.checkAngleForOrtho(self.eventAngleWithInstantSlope(h_a.coords,
                                                                                    holes[h_a_idx + 1].coords,
                                                                                    h_b.coords)):
-                        # Check if any intercepts
-                        searchRect = self.cartesian_bounding_box(self.orthoBoundingBox((h_a.coords, h_b.coords)))
-                        routePos = True
-                        multiPos = True
-                        tracksHit = []
-                        holesHitAllTracks = []
-                        for t_interc in self.byTrackCandidateSets:
-                            intercPoints = self.points_in_rectangle(t_interc.holeCoords_l, searchRect)
-                            intercVects = self.build_interception_test_vector_set(t_interc.holeCoords_l, intercPoints)
-                            holesHit = []
-                            if self.check_intersections({(h_a.coords, h_b.coords)}, intercVects, h_a, h_b, holesHit,
-                                                        t_interc.trackNum):
-                                routePos = False
-                                tracksHit.extend([t_interc.trackNum] * len(holesHit))
-                                holesHitAllTracks.extend(holesHit)
-
-                            if self.check_proximity_intersects(h_a, h_b, holesHit, t_interc.holes,
-                                                               t_interc.holeCoords_l,
-                                                               intercPoints):
-                                # Check for proximity
-                                routePos = False
-                                multiPos = False
-
-                        if routePos:
-                            t.addCandidateEvent(CandidateEvent(t.trackNum, h_a, h_b, False, config=self.config))
-                        elif multiPos and not t.trackNum in tracksHit:
-                            # Check to see if multi-track event possible
-                            # if contains only couples, we are good!
-                            tracksForExtension = []
-                            tracksClosed = [t.trackNum]
-                            eligibleForExtension = False
-                            completeMulti = False
-                            # NOTE that if say we are on track 1 (inner) and there is an enclosing fold of say track 2
-                            # this multi-event will be picked up when we run track 2
-                            trackshit_cleaned = cp.deepcopy(tracksHit)
-                            if len([h for h in holesHitAllTracks if h.lastHole]) == 0:
-                                for t_sub_num in list(set(tracksHit)):
-                                    if tracksHit.count(t_sub_num) == 1:
-                                        # Track only hit once, elig for ext!
-                                        tracksForExtension.append(t_sub_num)
-                                        eligibleForExtension = True
-                                        completeMulti = False
-                                    elif tracksHit.count(t_sub_num) == 2:
-                                        tracksClosed.append(t_sub_num)
-                                        trackshit_cleaned = [t for t in trackshit_cleaned if t != t_sub_num]
-                                        if not eligibleForExtension: completeMulti = True
-                                    elif tracksHit.count(t_sub_num) > 2:
-                                        # Cannot ever hit track more than 2x!
-                                        eligibleForExtension = False
-                                        completeMulti = False
-                                        break
-                                tracksHit = trackshit_cleaned
-                            if len(tracksHit) == 0: eligibleForExtension = False
-
-                            if eligibleForExtension:
-                                extensions = self.extend_line(h_a.coords, h_b.coords, self.config.maxeventlineext)
-                                rects = self.create_extended_rectangles(h_a.coords, h_b.coords,
-                                                                        self.config.maxeventlineext)
-                                holesHitList_l = []
-                                # tracksSubset = [sub_t_c_set for sub_t_c_set in self.byTrackCandidateSets
-                                #                 if sub_t_c_set.trackNum not in tracksClosed]
-                                for l in range(0, 2):
-                                    holesHit = []
-                                    for t_interc in self.byTrackCandidateSets:
-                                        intercPoints = self.points_in_rectangle(t_interc.holeCoords_l, rects[l])
-                                        intercVects = self.build_interception_test_vector_set(t_interc.holeCoords_l,
-                                                                                              intercPoints)
-
-                                        self.check_intersections({extensions[l]}, intercVects, h_a, h_b, holesHit,
-                                                                 t_interc.trackNum)
-                                    holesHitList_l.append(self.ordered_by_proximity(holesHit, extensions[l][0]))
-
-                                # Trace along each ext, determine if can aquire symmetry
-                                extPos = True
-                                holesHitMultiList_l = [h_a, h_b]
-                                holesHitMultiList_l.extend(holesHitAllTracks)
-                                cnt = [0, 0]
-                                mx = [len(holesHitList_l[0]), len(holesHitList_l[1])]
-                                stuck = [False, False]
-                                while cnt[0] < mx[0] or cnt[1] < mx[1]:
-                                    if len(tracksClosed) == len(self.board.tracks): break
-                                    for i in [0, 1]:
-                                        if len(tracksClosed) == len(self.board.tracks): break
-                                        if cnt[i] >= mx[i]:
-                                            stuck[i] = True
-                                        else:
-                                            if (not holesHitMultiList_l[i].lastHole and
-                                                    holesHitMultiList_l[i][cnt[i]].tracknum in tracksHit):
-                                                # Success!  We have closed a loop
-                                                tracksHit.remove(holesHitList_l[i][cnt[i]].tracknum)
-                                                tracksClosed.append(holesHitList_l[i][cnt[i]].tracknum)
-                                                holesHitMultiList_l.append(holesHitList_l[i][cnt[i]])
-                                                mx[i] += 1
-                                            elif len([s for s in stuck if s == True]) < 2:
-                                                if not stuck[i]:
-                                                    # Line now stuck, save this point for later
-                                                    stuck[i] = True
-                                            else:
-                                                # Tracks all stuck, ext not possible
-                                                extPos = False
-                                                break
-                                    if not extPos: break
-
-                                if extPos and len(tracksHit) == 0 and len(holesHitMultiList_l) % 2 == 0:
-                                    # Re-check proximity for new line trace
-                                    full_line = self.find_longest_line([h.coords for h in holesHitMultiList_l])
-                                    for t_interc in self.byTrackCandidateSets:
-                                        if not extPos: break
-                                        searchRect = self.cartesian_bounding_box(
-                                            self.orthoBoundingBox((full_line[0], full_line[1])))
-                                        intercPoints = self.points_in_rectangle(t_interc.holeCoords_l, searchRect)
-                                        if self.check_proximity_intersects(h_a, h_b, holesHitMultiList_l,
-                                                                           t_interc.holes,
-                                                                           t_interc.holeCoords_l, intercPoints):
-                                            extPos = False
-                                    # Ran the gauntlet and we are good!
-                                    if extPos: self.addMultiTrackEvent(board, holesHitMultiList_l)
-
-                            elif completeMulti:
-                                # Already completed multi! Woohoo!
-                                holesHitMultiList_l = cp.deepcopy(holesHitAllTracks)
-                                holesHitMultiList_l.extend([h_a, h_b])
-                                if len(holesHitMultiList_l) % 2 != 0:
-                                    sdfsd = ""
-                                self.addMultiTrackEvent(board, holesHitMultiList_l)
+                        self._try_direct_or_multi_track_event(board, t, h_a, h_b)
 
                     # TODO: add in half-orthos, when direct to 1 but not the other
                     elif self.checkAngleForOrtho(self.eventAngleWithInstantSlope(h_b.coords, holes[h_b_idx - 1].coords,
                                                                                  h_a.coords)):
-                        # Determine if can otherwise route indirectly along orthogonal space either side of track path
-                        curEvent = CandidateEvent(t.trackNum, h_a, h_b, True, config=self.config)
-                        for rev in (False, True):
-                            orthoVectsSearchAreas = list(self.smallest_enclosing_rectangle(h_a.coords, h_b.coords,
-                                                                                           self.config.maxloopyorthoeventdisplacementincrements
-                                                                                           * self.config.eventminspacing, rev))
-                            maxIncr = self.config.maxloopyorthoeventdisplacementincrements
-                            minIncr = 0
-                            ortho = self.orthogonal_vector(h_a.coords, h_b.coords,
-                                                           self.config.maxloopyorthoeventdisplacementincrements
-                                                           * self.config.eventminspacing, rev)
-                            for t_interc in self.byTrackCandidateSets:
-                                intercPoints = self.points_in_rectangle(t_interc.holeCoords_l, orthoVectsSearchAreas)
-                                intercVects = self.build_interception_test_vector_set(t_interc.holeCoords_l,
-                                                                                      intercPoints)
-                                floorIncr, testIncr, = self.test_sidestep_events(h_a, h_b, t_interc.holes,
-                                                                                 t_interc.holeCoords_l, ortho,
-                                                                                 self.config.maxloopyorthoeventdisplacementincrements
-                                                                                 * self.config.eventminspacing,
-                                                                                 self.config.eventminspacing, intercVects, rev)
-                                if testIncr < maxIncr: maxIncr = testIncr
-                                if floorIncr > minIncr: minIncr = floorIncr
-                                if maxIncr == 0: break
+                        self._try_orthogonal_sidestep_event(t, h_a, h_b)
 
-                            if maxIncr == 0: break
-                            if not rev:
-                                curEvent.orthoFwdMaxIncr = maxIncr
-                                curEvent.orthoFwdMinIncr = minIncr
+        self._persist_candidate_events_to_db(sqlConn)
+
+    def _try_direct_or_multi_track_event(self, board, t, h_a, h_b):
+        """
+        Direct-route / multi-track-loop-closure branch of buildSet's per-
+        hole-pair search. Phase 7 code motion (verbatim, no logic changed)
+        of the `if not checkAngleForOrtho(...)` branch body.
+
+        Runs when the straight line from h_a to h_b is not orthogonally
+        blocked. Checks whether the direct route is actually clear of other
+        holes/tracks (adding a direct CandidateEvent to `t` if so), and if
+        not, whether a valid multi-track loop-closure event can be built
+        instead (added via `self.addMultiTrackEvent`).
+        """
+        # Check if any intercepts
+        searchRect = self.cartesian_bounding_box(self.orthoBoundingBox((h_a.coords, h_b.coords)))
+        routePos = True
+        multiPos = True
+        tracksHit = []
+        holesHitAllTracks = []
+        for t_interc in self.byTrackCandidateSets:
+            intercPoints = self.points_in_rectangle(t_interc.holeCoords_l, searchRect)
+            intercVects = self.build_interception_test_vector_set(t_interc.holeCoords_l, intercPoints)
+            holesHit = []
+            if self.check_intersections({(h_a.coords, h_b.coords)}, intercVects, h_a, h_b, holesHit,
+                                        t_interc.trackNum):
+                routePos = False
+                tracksHit.extend([t_interc.trackNum] * len(holesHit))
+                holesHitAllTracks.extend(holesHit)
+
+            if self.check_proximity_intersects(h_a, h_b, holesHit, t_interc.holes,
+                                               t_interc.holeCoords_l,
+                                               intercPoints):
+                # Check for proximity
+                routePos = False
+                multiPos = False
+
+        if routePos:
+            t.addCandidateEvent(CandidateEvent(t.trackNum, h_a, h_b, False, config=self.config))
+        elif multiPos and not t.trackNum in tracksHit:
+            # Check to see if multi-track event possible
+            # if contains only couples, we are good!
+            tracksForExtension = []
+            tracksClosed = [t.trackNum]
+            eligibleForExtension = False
+            completeMulti = False
+            # NOTE that if say we are on track 1 (inner) and there is an enclosing fold of say track 2
+            # this multi-event will be picked up when we run track 2
+            trackshit_cleaned = cp.deepcopy(tracksHit)
+            if len([h for h in holesHitAllTracks if h.lastHole]) == 0:
+                for t_sub_num in list(set(tracksHit)):
+                    if tracksHit.count(t_sub_num) == 1:
+                        # Track only hit once, elig for ext!
+                        tracksForExtension.append(t_sub_num)
+                        eligibleForExtension = True
+                        completeMulti = False
+                    elif tracksHit.count(t_sub_num) == 2:
+                        tracksClosed.append(t_sub_num)
+                        trackshit_cleaned = [t for t in trackshit_cleaned if t != t_sub_num]
+                        if not eligibleForExtension: completeMulti = True
+                    elif tracksHit.count(t_sub_num) > 2:
+                        # Cannot ever hit track more than 2x!
+                        eligibleForExtension = False
+                        completeMulti = False
+                        break
+                tracksHit = trackshit_cleaned
+            if len(tracksHit) == 0: eligibleForExtension = False
+
+            if eligibleForExtension:
+                extensions = self.extend_line(h_a.coords, h_b.coords, self.config.maxeventlineext)
+                rects = self.create_extended_rectangles(h_a.coords, h_b.coords,
+                                                        self.config.maxeventlineext)
+                holesHitList_l = []
+                # tracksSubset = [sub_t_c_set for sub_t_c_set in self.byTrackCandidateSets
+                #                 if sub_t_c_set.trackNum not in tracksClosed]
+                for l in range(0, 2):
+                    holesHit = []
+                    for t_interc in self.byTrackCandidateSets:
+                        intercPoints = self.points_in_rectangle(t_interc.holeCoords_l, rects[l])
+                        intercVects = self.build_interception_test_vector_set(t_interc.holeCoords_l,
+                                                                              intercPoints)
+
+                        self.check_intersections({extensions[l]}, intercVects, h_a, h_b, holesHit,
+                                                 t_interc.trackNum)
+                    holesHitList_l.append(self.ordered_by_proximity(holesHit, extensions[l][0]))
+
+                # Trace along each ext, determine if can aquire symmetry
+                extPos = True
+                holesHitMultiList_l = [h_a, h_b]
+                holesHitMultiList_l.extend(holesHitAllTracks)
+                cnt = [0, 0]
+                mx = [len(holesHitList_l[0]), len(holesHitList_l[1])]
+                stuck = [False, False]
+                while cnt[0] < mx[0] or cnt[1] < mx[1]:
+                    if len(tracksClosed) == len(self.board.tracks): break
+                    for i in [0, 1]:
+                        if len(tracksClosed) == len(self.board.tracks): break
+                        if cnt[i] >= mx[i]:
+                            stuck[i] = True
+                        else:
+                            if (not holesHitMultiList_l[i].lastHole and
+                                    holesHitMultiList_l[i][cnt[i]].tracknum in tracksHit):
+                                # Success!  We have closed a loop
+                                tracksHit.remove(holesHitList_l[i][cnt[i]].tracknum)
+                                tracksClosed.append(holesHitList_l[i][cnt[i]].tracknum)
+                                holesHitMultiList_l.append(holesHitList_l[i][cnt[i]])
+                                mx[i] += 1
+                            elif len([s for s in stuck if s == True]) < 2:
+                                if not stuck[i]:
+                                    # Line now stuck, save this point for later
+                                    stuck[i] = True
                             else:
-                                curEvent.orthoRevMaxIncr = maxIncr
-                                curEvent.orthoRevMinIncr = minIncr
+                                # Tracks all stuck, ext not possible
+                                extPos = False
+                                break
+                    if not extPos: break
 
-                            curEvent.orthoVector = ortho
+                if extPos and len(tracksHit) == 0 and len(holesHitMultiList_l) % 2 == 0:
+                    # Re-check proximity for new line trace
+                    full_line = self.find_longest_line([h.coords for h in holesHitMultiList_l])
+                    for t_interc in self.byTrackCandidateSets:
+                        if not extPos: break
+                        searchRect = self.cartesian_bounding_box(
+                            self.orthoBoundingBox((full_line[0], full_line[1])))
+                        intercPoints = self.points_in_rectangle(t_interc.holeCoords_l, searchRect)
+                        if self.check_proximity_intersects(h_a, h_b, holesHitMultiList_l,
+                                                           t_interc.holes,
+                                                           t_interc.holeCoords_l, intercPoints):
+                            extPos = False
+                    # Ran the gauntlet and we are good!
+                    if extPos: self.addMultiTrackEvent(board, holesHitMultiList_l)
 
-                        if curEvent.orthoFwdMaxIncr > 0 or curEvent.orthoRevMaxIncr > 0: t.addCandidateEvent(curEvent)
+            elif completeMulti:
+                # Already completed multi! Woohoo!
+                holesHitMultiList_l = cp.deepcopy(holesHitAllTracks)
+                holesHitMultiList_l.extend([h_a, h_b])
+                if len(holesHitMultiList_l) % 2 != 0:
+                    sdfsd = ""
+                self.addMultiTrackEvent(board, holesHitMultiList_l)
 
+    def _try_orthogonal_sidestep_event(self, t, h_a, h_b):
+        """
+        Orthogonal/loopy-sidestep branch of buildSet's per-hole-pair search.
+        Phase 7 code motion (verbatim, no logic changed) of the
+        `elif checkAngleForOrtho(...)` branch body.
+
+        Runs when h_a/h_b require an orthogonal sidestep route. Searches
+        both directions (forward/reverse) for the largest displacement
+        increment that keeps the sidestep clear of other holes, adding the
+        resulting CandidateEvent to `t` if either direction found room.
+        """
+        # Determine if can otherwise route indirectly along orthogonal space either side of track path
+        curEvent = CandidateEvent(t.trackNum, h_a, h_b, True, config=self.config)
+        for rev in (False, True):
+            orthoVectsSearchAreas = list(self.smallest_enclosing_rectangle(h_a.coords, h_b.coords,
+                                                                           self.config.maxloopyorthoeventdisplacementincrements
+                                                                           * self.config.eventminspacing, rev))
+            maxIncr = self.config.maxloopyorthoeventdisplacementincrements
+            minIncr = 0
+            ortho = self.orthogonal_vector(h_a.coords, h_b.coords,
+                                           self.config.maxloopyorthoeventdisplacementincrements
+                                           * self.config.eventminspacing, rev)
+            for t_interc in self.byTrackCandidateSets:
+                intercPoints = self.points_in_rectangle(t_interc.holeCoords_l, orthoVectsSearchAreas)
+                intercVects = self.build_interception_test_vector_set(t_interc.holeCoords_l,
+                                                                      intercPoints)
+                floorIncr, testIncr, = self.test_sidestep_events(h_a, h_b, t_interc.holes,
+                                                                 t_interc.holeCoords_l, ortho,
+                                                                 self.config.maxloopyorthoeventdisplacementincrements
+                                                                 * self.config.eventminspacing,
+                                                                 self.config.eventminspacing, intercVects, rev)
+                if testIncr < maxIncr: maxIncr = testIncr
+                if floorIncr > minIncr: minIncr = floorIncr
+                if maxIncr == 0: break
+
+            if maxIncr == 0: break
+            if not rev:
+                curEvent.orthoFwdMaxIncr = maxIncr
+                curEvent.orthoFwdMinIncr = minIncr
+            else:
+                curEvent.orthoRevMaxIncr = maxIncr
+                curEvent.orthoRevMinIncr = minIncr
+
+            curEvent.orthoVector = ortho
+
+        if curEvent.orthoFwdMaxIncr > 0 or curEvent.orthoRevMaxIncr > 0: t.addCandidateEvent(curEvent)
+
+    def _persist_candidate_events_to_db(self, sqlConn):
+        """
+        DB-persistence tail of buildSet. Phase 7 code motion (verbatim, no
+        logic changed).
+
+        For each track: dedupes its candidate events, deletes that track's
+        existing TempCandidateEvents rows for this board, and re-inserts the
+        current candidate set.
+        """
         # Calculate final sets, for uniqueness
         timestamp = dt.now().strftime('%m/%d/%y %H:%M:%S')
         for t in self.byTrackCandidateSets:
@@ -882,6 +919,11 @@ class PossibleEvents:
             - The input vectors as lines
 
         """
+        # Lazy import: matplotlib.pyplot is only ever needed by this one
+        # debug-plotting method, so it shouldn't be a hard import-time
+        # dependency for every caller of this module (Phase 7 cleanup).
+        import matplotlib.pyplot as plt
+
         plt.figure(figsize=(15, 10))
         for vector in vectors:
             x_values = [vector[0][0], vector[1][0]]

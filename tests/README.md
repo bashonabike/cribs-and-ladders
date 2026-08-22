@@ -339,6 +339,49 @@ extensions). `pytest -m integration` is the rest.
     `cribsandladders.event_curve_math` directly instead of proxying
     through `self.eventSetBuilder`, since that's exactly what
     `EventSetBuilder`'s own delegating wrappers already do.
+- `test_possible_events_build_set.py` -- Refactor Mk II ([[Refactor Mk
+  ii]] in the Obsidian vault), Phase 7, done. `PossibleEvents.buildSet()`
+  was ~300 lines: setup, a per-hole-pair double loop with a two-way
+  `if`/`elif` branch (each branch itself dozens of lines of real
+  geometry -- direct-route/multi-track-loop-closure search on one side,
+  orthogonal/loopy-sidestep search on the other), and a DB-persistence
+  tail, all inline in one method with effectively zero test coverage
+  (`test_possible_events.py`'s own module docstring calls it out as "not
+  a good target for unit tests in one pass"). Confirmed by reading (no
+  shared local variables between the `if` and `elif` branch bodies) that
+  the three pieces could be split with pure code motion:
+  - `_try_direct_or_multi_track_event(self, board, t, h_a, h_b)` -- the
+    `if not checkAngleForOrtho(...)` branch body.
+  - `_try_orthogonal_sidestep_event(self, t, h_a, h_b)` -- the
+    `elif checkAngleForOrtho(...)` branch body.
+  - `_persist_candidate_events_to_db(self, sqlConn)` -- the DB-persistence
+    tail (dedupe, delete, rebuild the insert DataFrame, `executemany`).
+  - `buildSet` itself is now a thin coordinator: the setup preamble, the
+    per-hole-pair loop deciding which branch method to call, then a call
+    to the persistence method.
+
+  Because none of the three pieces had any existing tests to lean on,
+  this file is a golden/characterization test built *before* the split:
+  a small but real `Board` (one zigzagging 9-hole track -- a straight
+  line turned out to make every hole pair uniformly accept or reject in
+  the ortho-sidestep branch, which is a weak regression signal) is run
+  through the pre-refactor `buildSet()` once, the output hand-verified
+  to be a genuine mix (21 accepted / 15 rejected pairs out of 36), and
+  that exact result hardcoded as the expected value -- for both the
+  resulting `CandidateEvent`s and the rows written to an in-memory
+  `TempCandidateEvents` table (schema reverse-engineered via `PRAGMA
+  table_info`/`sqlite_master.sql` against the real `etc/Temp.db`, since
+  no `CREATE TABLE` for it exists anywhere in the repo). A second test
+  reruns the same fixture with a tighter
+  `maxloopyorthoeventdisplacementincrements` budget and checks fewer
+  candidates are accepted, confirming the accept/reject decision
+  actually responds to config rather than being a fixed artifact of
+  the fixture's geometry. Both tests passed unchanged after the split.
+
+  Also moved `matplotlib.pyplot` from a module-level import to a lazy
+  import inside `testPlotVectorsOnHoles` (its only user) -- the module's
+  real geometry code uses `matplotlib.path`, not `pyplot`, so nothing
+  else in the file needs it at import time.
 
 ## Fixtures
 
