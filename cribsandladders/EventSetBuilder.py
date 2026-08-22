@@ -858,17 +858,335 @@ class EventSetBuilder:
                             break
         return num_two_hits, num_two_hits_loose, net_lengths, False
 
+    def _score_candidate_instance(self, t, hole, candEventSpecs, instType,
+                                  canBeChute, canBeChuteOnly, canBeLadder, canBeLadderOnly,
+                                  chutes, chuteBases, chuteTops, ladders, ladderBases, ladderTops,
+                                  params, explicitEvent, explicitChute, explicitLadder):
+        """
+        Scores one (candidate event, instance type) combination -- Phase 8
+        step 4 extraction (see [[Refactor Mk ii]] in the Obsidian vault) of
+        scoreEventsForHole's per-instance-type scoring body (the CHUTEONLY/
+        LADDERONLY/CHUTEANDLADDER loop body: balance scoring, energy-buffer
+        scoring, two-hit detection via _scan_two_hits_for_direction, cancel
+        impedance, end-of-track weighting, length-histogram scoring, and
+        length-over-time scoring). Pure code motion -- every `continue` in
+        the original loop body becomes a `return None` here (meaning: skip
+        this instType, same as the original continuing to the next one), and
+        the original `eventFitnesses.append(dict(...))` becomes `return
+        dict(...)`. The candidate-gating/cursor-walking loop above this in
+        scoreEventsForHole is unchanged -- `candEventSpecs` is passed in
+        already resolved, rather than this method reaching back into
+        `t.candcursor` itself.
+
+        Mutates `self.avgScoreSum`/`self.avgScoreDiv`/`self.avgScore` and
+        `t.numnogos` exactly as the original inline code did (these are real
+        instance/track state, not local to one call).
+
+        Returns:
+            dict | None: a fitness dict (same shape the original code
+            appended to `eventFitnesses`) if this instType/candidate
+            combination scored and passed every rejection check, else
+            None (caller should not append anything and move on to the
+            next instType).
+        """
+        effEnergy, effCompModulation = 0, 0
+        effLengthForecast, partialTrackEnd = 0, 0
+        # modsForType = []
+        match instType:
+            case en.InstanceEventType.CHUTEONLY:
+                if not canBeChute: return None
+                if not canBeChuteOnly: return None
+                if (explicitEvent is None and not candEventSpecs['event'].isOrtho and
+                        candEventSpecs['event'].crowLength < self.config.mincrowvectordistcancel):
+                    return None
+                if explicitEvent is not None and explicitLadder: return None
+                effEnergy = candEventSpecs['length']
+                # modsForType = allModsIfChute
+                effLengthForecast = \
+                self.runPartialTrackEffLengthHoles(t.track_id, t.eventsetbuild, t.tracklength,
+                                                   tentNewChute=(candEventSpecs['event'].endHole.num,
+                                                                 candEventSpecs['event'].startHole.num),
+                                                   readMode=True)[0]
+            case en.InstanceEventType.LADDERONLY:
+                if not canBeLadder: return None
+                if not canBeLadderOnly: return None
+                if (explicitEvent is None and not candEventSpecs['event'].isOrtho and
+                        candEventSpecs['event'].crowLength < self.config.mincrowvectordistcancel):
+                    return None
+                if explicitEvent is not None and explicitChute: return None
+                effEnergy = candEventSpecs['length']
+                # modsForType = allModsIfLadder
+                effLengthForecast = \
+                self.runPartialTrackEffLengthHoles(t.track_id, t.eventsetbuild, t.tracklength,
+                                                   tentNewLadder=(candEventSpecs['event'].startHole.num,
+                                                                  candEventSpecs['event'].endHole.num),
+                                                   readMode=True)[0]
+            case en.InstanceEventType.CHUTEANDLADDER:
+                if not (canBeChute and canBeLadder): return None
+                effEnergy = 2 * candEventSpecs['length']
+                # modsForType = allModsIfChute + allModsIfLadder
+                effLengthForecast = \
+                self.runPartialTrackEffLengthHoles(t.track_id, t.eventsetbuild, t.tracklength,
+                                                   tentNewLadder=(candEventSpecs['event'].startHole.num,
+                                                                  candEventSpecs['event'].endHole.num),
+                                                   tentNewChute=(candEventSpecs['event'].endHole.num,
+                                                                 candEventSpecs['event'].startHole.num),
+                                                   readMode=True)[0]
+
+        # Infinite looping observed!!  Not a good set
+        if effLengthForecast >= 9999999: return None
+        # Adjust length as per control length
+        effLengthForecast *= t.tracklength / t.controllength
+        # NOTE: impeders are (-), boosters are (+)
+        effCompModulation = effLengthForecast - t.curestefflength
+        # print(str(effCompModulation))
+
+        # BASE SCORE ON BLEND MOD + ENERGY
+
+        # NOTE: longer balanceandefflengthcontrolfactor for longer route
+        balFactor = params.tryGetParam(t.track_id, 'balanceandefflengthcontrolfactor')
+        lengtheningControl, shorteningControl = balFactor, 1.0 - balFactor
+        curEstLengthDiscr = t.curestefflength - self.config.effectiveboardlength
+        instEstLengthDiscr = effLengthForecast - self.config.effectiveboardlength
+        if abs(curEstLengthDiscr) > 10:
+            sdfd = ""
+        instEstLengthDisp = effLengthForecast - t.curestefflength
+        # Too much instability!  Nix this uber event
+        if instEstLengthDisp > self.config.maxefflengthdisp: return None
+
+        curScore = 1.0  # Base amt
+        if curEstLengthDiscr != 0:
+            # If board is perfect, leave it alone!  Highly unlikely tho except for inital run
+            balScoreMod = abs(instEstLengthDiscr) / abs(curEstLengthDiscr)
+            # If we are moving in correct direction, reward
+            reward = abs(instEstLengthDiscr) < abs(curEstLengthDiscr)
+            if curEstLengthDiscr > 0:
+                # Apply shortening control, board is too long
+                if reward:
+                    # curScore = balScoreMod/self.config.gamelengthtightness
+                    curScore = balScoreMod * math.pow((1.0 - shorteningControl), self.config.gamelengthtightness)
+                else:
+                    # curScore = balScoreMod*self.config.gamelengthtightness
+                    curScore = balScoreMod * math.pow((1.0 + shorteningControl), self.config.gamelengthtightness)
+            elif curEstLengthDiscr < 0:
+                # Apply lengthening control, board is too short
+                if reward:
+                    # curScore = balScoreMod/self.config.gamelengthtightness
+                    curScore = balScoreMod * math.pow((1.0 - lengtheningControl), self.config.gamelengthtightness)
+                else:
+                    # curScore = balScoreMod*self.config.gamelengthtightness
+                    curScore = balScoreMod * math.pow((1.0 + lengtheningControl), self.config.gamelengthtightness)
+
+        if abs(effEnergy) + abs(t.energybuffer) > 0:
+            curScore *= (1.0 + (params.tryGetParam(t.track_id, 'energybufferenforcement')
+                                * abs(effEnergy - t.energybuffer) / (
+                                            abs(effEnergy) + abs(t.energybuffer))))
+        effNetEnergy = effEnergy + abs(effCompModulation)
+
+        # #NOTE: longer balanceandefflengthcontrolfactor for longer route
+        # balFactor = params.tryGetParam(t.track_id, 'balanceandefflengthcontrolfactor')
+        # #TODO: re-enable this??
+        # # if instType == en.InstanceEventType.CHUTEONLY and balFactor > 0.5:
+        # #     curScore *= (1.0 - balFactor)/0.2
+        # # elif instType == en.InstanceEventType.LADDERONLY and balFactor < 0.5:
+        # #     curScore *= balFactor/0.2
+        # # elif instType == en.InstanceEventType.LADDERONLY and balFactor > 0.5:
+        # #     curScore /= (1.0 - balFactor)/0.2
+        # # elif instType == en.InstanceEventType.CHUTEONLY and balFactor < 0.5:
+        # #     curScore /= balFactor/0.2
+        # curEstLengthDiscr = t.curestefflength - self.config.effectiveboardlength
+        # instEstLengthDiscr = effLengthForecast - self.config.effectiveboardlength
+        # if abs(curEstLengthDiscr) > 10:
+        #     sdfd=""
+        # instEstLengthDisp = effLengthForecast - t.curestefflength
+        # #Too much instability!  Nix this uber event
+        # if instEstLengthDisp > self.config.maxefflengthdisp: continue
+        #
+        # if curEstLengthDiscr != 0:
+        #     #If board is perfect, leave it alone!  Highly unlikely tho except for inital run
+        #     balScoreMod = abs(instEstLengthDiscr)/abs(curEstLengthDiscr)
+        #     #If we are moving in correct direction, reward
+        #     reward = abs(instEstLengthDiscr) < abs(curEstLengthDiscr)
+        #     lengtheningControl, shorteningControl = balFactor, 1.0 - balFactor
+        #     if curEstLengthDiscr > 0:
+        #         #Apply shortening control, board is too long
+        #         if reward: curScore *= balScoreMod*(1.0 - shorteningControl)
+        #         else: curScore *= balScoreMod*(1.0 + shorteningControl)
+        #     elif curEstLengthDiscr > 0:
+        #         #Apply lengthening control, board is too short
+        #         if reward: curScore *= balScoreMod*(1.0 - lengtheningControl)
+        #         else: curScore *= balScoreMod*(1.0 + lengtheningControl)
+
+        # Check for two-hits
+        numTwoHits = 0
+        numTwoHitsLoose = 0
+        twoHitNetLengths = []
+        twoHitInvalid = False
+
+        # def getTwoHitNetLength(p, chutesOrLadders, searchHoleNum, foundHoleType, eventLength):
+        #     for l in chutesOrLadders:
+        #         if l[foundHoleType] == searchHoleNum + p:
+        #             return l['length'] + eventLength
+        #     return 0
+
+        if instType in (en.InstanceEventType.LADDERONLY, en.InstanceEventType.CHUTEANDLADDER):
+            # Forward: same-type (ladder) matches unguarded, opposite-type
+            # (chute) matches guarded -- see _scan_two_hits_for_direction's
+            # docstring for the TODO on this asymmetry.
+            deltaHits, deltaLoose, deltaLengths, invalid = self._scan_two_hits_for_direction(
+                candEventSpecs['event'].endHole.num, (1, 2, 4),
+                ladderBases, ladders, 'ladderbase', False, lambda el, ll: ll + el,
+                chuteTops, chutes, 'chutetop', True, lambda el, cl: el - cl,
+                candEventSpecs['event'].length)
+            numTwoHits += deltaHits
+            numTwoHitsLoose += deltaLoose
+            twoHitNetLengths.extend(deltaLengths)
+            twoHitInvalid = twoHitInvalid or invalid
+            if twoHitInvalid: return None
+            deltaHits, deltaLoose, deltaLengths, invalid = self._scan_two_hits_for_direction(
+                candEventSpecs['event'].startHole.num, (-1, -2, -4),
+                ladderTops, ladders, 'laddertop', False, lambda el, ll: el + ll,
+                chuteBases, chutes, 'chutebase', True, lambda el, cl: el - cl,
+                candEventSpecs['event'].length)
+            numTwoHits += deltaHits
+            numTwoHitsLoose += deltaLoose
+            twoHitNetLengths.extend(deltaLengths)
+            twoHitInvalid = twoHitInvalid or invalid
+            if twoHitInvalid: return None
+
+        if instType in (en.InstanceEventType.CHUTEONLY, en.InstanceEventType.CHUTEANDLADDER):
+            # Forward: opposite-type (ladder) matches guarded, same-type
+            # (chute) matches unguarded -- mirror image of the LADDERONLY
+            # branch above; see _scan_two_hits_for_direction's docstring.
+            deltaHits, deltaLoose, deltaLengths, invalid = self._scan_two_hits_for_direction(
+                candEventSpecs['event'].startHole.num, (1, 2, 4),
+                ladderBases, ladders, 'ladderbase', True, lambda el, ll: ll - el,
+                chuteTops, chutes, 'chutetop', False, lambda el, cl: (-1) * cl - el,
+                candEventSpecs['event'].length)
+            numTwoHits += deltaHits
+            numTwoHitsLoose += deltaLoose
+            twoHitNetLengths.extend(deltaLengths)
+            twoHitInvalid = twoHitInvalid or invalid
+            if twoHitInvalid: return None
+
+            deltaHits, deltaLoose, deltaLengths, invalid = self._scan_two_hits_for_direction(
+                candEventSpecs['event'].endHole.num, (-1, -2, -4),
+                ladderTops, ladders, 'laddertop', True, lambda el, ll: ll - el,
+                chuteBases, chutes, 'chutebase', False, lambda el, cl: (-1) * cl - el,
+                candEventSpecs['event'].length)
+            numTwoHits += deltaHits
+            numTwoHitsLoose += deltaLoose
+            twoHitNetLengths.extend(deltaLengths)
+            twoHitInvalid = twoHitInvalid or invalid
+            if twoHitInvalid: return None
+
+        if len(twoHitNetLengths) > 0 and (min(twoHitNetLengths) < (-1) * self.config.maxtwohitnetgainloss or
+                                          max(twoHitNetLengths) > self.config.maxtwohitnetgainloss):
+            return None
+
+        if (numTwoHits > 0 and numTwoHits * params.tryGetParam(t.track_id, 'twohitfreqimpedance') >
+                (self.config.allowabletwohits - t.twohitsthusfar)):
+            return None
+
+        curScore *= (1.0 + (numTwoHits + numTwoHitsLoose / 2) * t.twohitsthusfar *
+                     params.tryGetParam(t.track_id, 'twohitfreqimpedance'))
+
+        # Impede score if too many ladders/chutes are getting cancelled
+        if instType != en.InstanceEventType.CHUTEANDLADDER and t.cancels >= self.config.whenstartworryingaboutcancels:
+            if t.cancels >= 2.5 * self.config.whenstartworryingaboutcancels: return None
+            curScore *= (1.0 + params.tryGetParam(t.track_id, 'cancelimpedance') * (t.cancels + 1)
+                         / (t.eventscount + 1))
+
+        # Preferentially weight based on proximity to end of track
+        endTrackWeight = params.tryGetParam(t.track_id, 'eventstowardsendoftrackreward')
+        eventPosRelMidpoints = candEventSpecs['event'].midPointNum / t.tracklength - 0.5
+        if eventPosRelMidpoints < 0:
+            curScore *= (1.0 + abs(eventPosRelMidpoints) * endTrackWeight)
+        else:
+            curScore /= (1.0 + abs(eventPosRelMidpoints) * endTrackWeight)
+
+        # Factor in distribution of length histogram to help ensure distributed lengths
+        # Try to curve fit specified ideal histo
+        # NOTE: golf-stylee, lower score is better
+        curLenPerc = 0.0
+        curLength = candEventSpecs['length']
+        if sum([h[1] for h in self.allTentLengthHisto]) > 0:
+            curLenPerc = (self.allTentLengthHisto[curLength - 1][1] /
+                          sum([h[1] for h in self.allTentLengthHisto]))
+        idealPerc = t.lengthdistidealcurve[curLength - 1][1]
+        lenDistDisp = curLenPerc - idealPerc
+        if lenDistDisp < 0:
+            # Need more!
+            curScore /= (1.0 + abs(lenDistDisp)) * params.tryGetParam(t.track_id,
+                                                                      'lengthhistogramscoringfactor')
+        elif lenDistDisp > 0:
+            # Too many of this length already, downshift
+            curScore *= (1.0 + abs(lenDistDisp)) * params.tryGetParam(t.track_id,
+                                                                      'lengthhistogramscoringfactor')
+
+        # Factor in distribution of length over time
+        # TEMP!!
+        if len(t.lengthovertimeideal) < hole.num:
+            print("FAILED LENGTH OVER TIME TEST: hole.num {}".format(hole.num))
+        else:
+            idealLengthForHole = t.lengthovertimeideal[hole.num - 1][1]
+            scoreMod = (1.0 + (abs(curLength - idealLengthForHole) / t.maxlength) *
+                        params.tryGetParam(t.track_id, 'lengthovertimescoringfactor'))
+            if curScore >= 0:
+                curScore *= scoreMod
+            else:
+                curScore /= scoreMod
+
+        # Aggr into avg score
+        self.avgScoreSum += curScore
+        self.avgScoreDiv += 1
+        self.avgScore = self.avgScoreSum / self.avgScoreDiv
+
+        # Elminate options based on shortening & lengthening control
+        if (curEstLengthDiscr > 0 and shorteningControl > 0.5 and curScore > self.avgScore
+                * self.config.goodscorecutoffperc * 2 * (
+                        1.0 - (2 * (shorteningControl - 0.5)))):
+            t.numnogos += 1
+            return None
+        elif (curEstLengthDiscr < 0 and lengtheningControl > 0.5 and curScore > self.avgScore
+              * self.config.goodscorecutoffperc * 2 * (
+                      1.0 - (2 * (lengtheningControl - 0.5)))):
+            t.numnogos += 1
+            return None
+
+        return dict(event=candEventSpecs['event'],
+                                   eventspecs=candEventSpecs,
+                                   score=curScore, effnetenergy=effNetEnergy,
+                                   effcompmodulation=effCompModulation,
+                                   insttype=instType,
+                                   instchute=instType in (en.InstanceEventType.CHUTEANDLADDER,
+                                                          en.InstanceEventType.CHUTEONLY),
+                                   instladder=instType in (en.InstanceEventType.CHUTEANDLADDER,
+                                                           en.InstanceEventType.LADDERONLY),
+                                   lasteventtop=0
+                                   ,
+                                   twohits=numTwoHits, estefflength=effLengthForecast
+                                   )
+
     def scoreEventsForHole(self, t, hole,
                            chutes, chuteBases, chuteTops, ladders, ladderBases, ladderTops, params, trackEventsOverview,
                            explicitEvent=None, explicitChute=False, explicitLadder=False):
         """
         Calculate a score for placing an event at a specific hole.
-        
+
         Evaluates the impact of placing an event (ladder or chute) at the given hole
         based on various factors including proximity to other events and game balance.
-        
+
+        Per-candidate cursor-walking/gating happens here; the actual
+        per-instance-type scoring (balance/energy-buffer/two-hit/cancel-
+        impedance/length-histogram/length-over-time) is delegated to
+        `_score_candidate_instance` (Phase 8 step 4 -- see [[Refactor Mk
+        ii]] in the Obsidian vault).
+
         Args:
-            t: Dictionary containing track information.
+            t: `TrackBuildState` instance containing this track's working
+                state (Phase 8 step 2 turned this from a plain dict into
+                a real class -- see `TrackBuildState`'s docstring).
             hole: The hole being evaluated for event placement.
             chutes: List of existing chutes on the track.
             chuteBases: List of base positions of chutes.
@@ -881,7 +1199,7 @@ class EventSetBuilder:
             explicitEvent: Optional explicit event to evaluate.
             explicitChute: If True, evaluate as a chute.
             explicitLadder: If True, evaluate as a ladder.
-            
+
         Returns:
             List of dictionaries containing scoring information for potential events.
         """
@@ -984,284 +1302,13 @@ class EventSetBuilder:
             # Insert event score as chute, ladder, and both
             for instType in (en.InstanceEventType.CHUTEONLY, en.InstanceEventType.LADDERONLY,
                              en.InstanceEventType.CHUTEANDLADDER):
-                effEnergy, effCompModulation = 0, 0
-                effLengthForecast, partialTrackEnd = 0, 0
-                # modsForType = []
-                match instType:
-                    case en.InstanceEventType.CHUTEONLY:
-                        if not canBeChute: continue
-                        if not canBeChuteOnly: continue
-                        if (explicitEvent is None and not candEventSpecs['event'].isOrtho and
-                                candEventSpecs['event'].crowLength < self.config.mincrowvectordistcancel):
-                            continue
-                        if explicitEvent is not None and explicitLadder: continue
-                        effEnergy = candEventSpecs['length']
-                        # modsForType = allModsIfChute
-                        effLengthForecast = \
-                        self.runPartialTrackEffLengthHoles(t.track_id, t.eventsetbuild, t.tracklength,
-                                                           tentNewChute=(candEventSpecs['event'].endHole.num,
-                                                                         candEventSpecs['event'].startHole.num),
-                                                           readMode=True)[0]
-                    case en.InstanceEventType.LADDERONLY:
-                        if not canBeLadder: continue
-                        if not canBeLadderOnly: continue
-                        if (explicitEvent is None and not candEventSpecs['event'].isOrtho and
-                                candEventSpecs['event'].crowLength < self.config.mincrowvectordistcancel):
-                            continue
-                        if explicitEvent is not None and explicitChute: continue
-                        effEnergy = candEventSpecs['length']
-                        # modsForType = allModsIfLadder
-                        effLengthForecast = \
-                        self.runPartialTrackEffLengthHoles(t.track_id, t.eventsetbuild, t.tracklength,
-                                                           tentNewLadder=(candEventSpecs['event'].startHole.num,
-                                                                          candEventSpecs['event'].endHole.num),
-                                                           readMode=True)[0]
-                    case en.InstanceEventType.CHUTEANDLADDER:
-                        if not (canBeChute and canBeLadder): continue
-                        effEnergy = 2 * candEventSpecs['length']
-                        # modsForType = allModsIfChute + allModsIfLadder
-                        effLengthForecast = \
-                        self.runPartialTrackEffLengthHoles(t.track_id, t.eventsetbuild, t.tracklength,
-                                                           tentNewLadder=(candEventSpecs['event'].startHole.num,
-                                                                          candEventSpecs['event'].endHole.num),
-                                                           tentNewChute=(candEventSpecs['event'].endHole.num,
-                                                                         candEventSpecs['event'].startHole.num),
-                                                           readMode=True)[0]
-
-                # Infinite looping observed!!  Not a good set
-                if effLengthForecast >= 9999999: continue
-                # Adjust length as per control length
-                effLengthForecast *= t.tracklength / t.controllength
-                # NOTE: impeders are (-), boosters are (+)
-                effCompModulation = effLengthForecast - t.curestefflength
-                # print(str(effCompModulation))
-
-                # BASE SCORE ON BLEND MOD + ENERGY
-
-                # NOTE: longer balanceandefflengthcontrolfactor for longer route
-                balFactor = params.tryGetParam(t.track_id, 'balanceandefflengthcontrolfactor')
-                lengtheningControl, shorteningControl = balFactor, 1.0 - balFactor
-                curEstLengthDiscr = t.curestefflength - self.config.effectiveboardlength
-                instEstLengthDiscr = effLengthForecast - self.config.effectiveboardlength
-                if abs(curEstLengthDiscr) > 10:
-                    sdfd = ""
-                instEstLengthDisp = effLengthForecast - t.curestefflength
-                # Too much instability!  Nix this uber event
-                if instEstLengthDisp > self.config.maxefflengthdisp: continue
-
-                curScore = 1.0  # Base amt
-                if curEstLengthDiscr != 0:
-                    # If board is perfect, leave it alone!  Highly unlikely tho except for inital run
-                    balScoreMod = abs(instEstLengthDiscr) / abs(curEstLengthDiscr)
-                    # If we are moving in correct direction, reward
-                    reward = abs(instEstLengthDiscr) < abs(curEstLengthDiscr)
-                    if curEstLengthDiscr > 0:
-                        # Apply shortening control, board is too long
-                        if reward:
-                            # curScore = balScoreMod/self.config.gamelengthtightness
-                            curScore = balScoreMod * math.pow((1.0 - shorteningControl), self.config.gamelengthtightness)
-                        else:
-                            # curScore = balScoreMod*self.config.gamelengthtightness
-                            curScore = balScoreMod * math.pow((1.0 + shorteningControl), self.config.gamelengthtightness)
-                    elif curEstLengthDiscr < 0:
-                        # Apply lengthening control, board is too short
-                        if reward:
-                            # curScore = balScoreMod/self.config.gamelengthtightness
-                            curScore = balScoreMod * math.pow((1.0 - lengtheningControl), self.config.gamelengthtightness)
-                        else:
-                            # curScore = balScoreMod*self.config.gamelengthtightness
-                            curScore = balScoreMod * math.pow((1.0 + lengtheningControl), self.config.gamelengthtightness)
-
-                if abs(effEnergy) + abs(t.energybuffer) > 0:
-                    curScore *= (1.0 + (params.tryGetParam(t.track_id, 'energybufferenforcement')
-                                        * abs(effEnergy - t.energybuffer) / (
-                                                    abs(effEnergy) + abs(t.energybuffer))))
-                effNetEnergy = effEnergy + abs(effCompModulation)
-
-                # #NOTE: longer balanceandefflengthcontrolfactor for longer route
-                # balFactor = params.tryGetParam(t.track_id, 'balanceandefflengthcontrolfactor')
-                # #TODO: re-enable this??
-                # # if instType == en.InstanceEventType.CHUTEONLY and balFactor > 0.5:
-                # #     curScore *= (1.0 - balFactor)/0.2
-                # # elif instType == en.InstanceEventType.LADDERONLY and balFactor < 0.5:
-                # #     curScore *= balFactor/0.2
-                # # elif instType == en.InstanceEventType.LADDERONLY and balFactor > 0.5:
-                # #     curScore /= (1.0 - balFactor)/0.2
-                # # elif instType == en.InstanceEventType.CHUTEONLY and balFactor < 0.5:
-                # #     curScore /= balFactor/0.2
-                # curEstLengthDiscr = t.curestefflength - self.config.effectiveboardlength
-                # instEstLengthDiscr = effLengthForecast - self.config.effectiveboardlength
-                # if abs(curEstLengthDiscr) > 10:
-                #     sdfd=""
-                # instEstLengthDisp = effLengthForecast - t.curestefflength
-                # #Too much instability!  Nix this uber event
-                # if instEstLengthDisp > self.config.maxefflengthdisp: continue
-                #
-                # if curEstLengthDiscr != 0:
-                #     #If board is perfect, leave it alone!  Highly unlikely tho except for inital run
-                #     balScoreMod = abs(instEstLengthDiscr)/abs(curEstLengthDiscr)
-                #     #If we are moving in correct direction, reward
-                #     reward = abs(instEstLengthDiscr) < abs(curEstLengthDiscr)
-                #     lengtheningControl, shorteningControl = balFactor, 1.0 - balFactor
-                #     if curEstLengthDiscr > 0:
-                #         #Apply shortening control, board is too long
-                #         if reward: curScore *= balScoreMod*(1.0 - shorteningControl)
-                #         else: curScore *= balScoreMod*(1.0 + shorteningControl)
-                #     elif curEstLengthDiscr > 0:
-                #         #Apply lengthening control, board is too short
-                #         if reward: curScore *= balScoreMod*(1.0 - lengtheningControl)
-                #         else: curScore *= balScoreMod*(1.0 + lengtheningControl)
-
-                # Check for two-hits
-                numTwoHits = 0
-                numTwoHitsLoose = 0
-                twoHitNetLengths = []
-                twoHitInvalid = False
-
-                # def getTwoHitNetLength(p, chutesOrLadders, searchHoleNum, foundHoleType, eventLength):
-                #     for l in chutesOrLadders:
-                #         if l[foundHoleType] == searchHoleNum + p:
-                #             return l['length'] + eventLength
-                #     return 0
-
-                if instType in (en.InstanceEventType.LADDERONLY, en.InstanceEventType.CHUTEANDLADDER):
-                    # Forward: same-type (ladder) matches unguarded, opposite-type
-                    # (chute) matches guarded -- see _scan_two_hits_for_direction's
-                    # docstring for the TODO on this asymmetry.
-                    deltaHits, deltaLoose, deltaLengths, invalid = self._scan_two_hits_for_direction(
-                        candEventSpecs['event'].endHole.num, (1, 2, 4),
-                        ladderBases, ladders, 'ladderbase', False, lambda el, ll: ll + el,
-                        chuteTops, chutes, 'chutetop', True, lambda el, cl: el - cl,
-                        candEventSpecs['event'].length)
-                    numTwoHits += deltaHits
-                    numTwoHitsLoose += deltaLoose
-                    twoHitNetLengths.extend(deltaLengths)
-                    twoHitInvalid = twoHitInvalid or invalid
-                    if twoHitInvalid: continue
-                    deltaHits, deltaLoose, deltaLengths, invalid = self._scan_two_hits_for_direction(
-                        candEventSpecs['event'].startHole.num, (-1, -2, -4),
-                        ladderTops, ladders, 'laddertop', False, lambda el, ll: el + ll,
-                        chuteBases, chutes, 'chutebase', True, lambda el, cl: el - cl,
-                        candEventSpecs['event'].length)
-                    numTwoHits += deltaHits
-                    numTwoHitsLoose += deltaLoose
-                    twoHitNetLengths.extend(deltaLengths)
-                    twoHitInvalid = twoHitInvalid or invalid
-                    if twoHitInvalid: continue
-
-                if instType in (en.InstanceEventType.CHUTEONLY, en.InstanceEventType.CHUTEANDLADDER):
-                    # Forward: opposite-type (ladder) matches guarded, same-type
-                    # (chute) matches unguarded -- mirror image of the LADDERONLY
-                    # branch above; see _scan_two_hits_for_direction's docstring.
-                    deltaHits, deltaLoose, deltaLengths, invalid = self._scan_two_hits_for_direction(
-                        candEventSpecs['event'].startHole.num, (1, 2, 4),
-                        ladderBases, ladders, 'ladderbase', True, lambda el, ll: ll - el,
-                        chuteTops, chutes, 'chutetop', False, lambda el, cl: (-1) * cl - el,
-                        candEventSpecs['event'].length)
-                    numTwoHits += deltaHits
-                    numTwoHitsLoose += deltaLoose
-                    twoHitNetLengths.extend(deltaLengths)
-                    twoHitInvalid = twoHitInvalid or invalid
-                    if twoHitInvalid: continue
-
-                    deltaHits, deltaLoose, deltaLengths, invalid = self._scan_two_hits_for_direction(
-                        candEventSpecs['event'].endHole.num, (-1, -2, -4),
-                        ladderTops, ladders, 'laddertop', True, lambda el, ll: ll - el,
-                        chuteBases, chutes, 'chutebase', False, lambda el, cl: (-1) * cl - el,
-                        candEventSpecs['event'].length)
-                    numTwoHits += deltaHits
-                    numTwoHitsLoose += deltaLoose
-                    twoHitNetLengths.extend(deltaLengths)
-                    twoHitInvalid = twoHitInvalid or invalid
-                    if twoHitInvalid: continue
-
-                if len(twoHitNetLengths) > 0 and (min(twoHitNetLengths) < (-1) * self.config.maxtwohitnetgainloss or
-                                                  max(twoHitNetLengths) > self.config.maxtwohitnetgainloss):
-                    continue
-
-                if (numTwoHits > 0 and numTwoHits * params.tryGetParam(t.track_id, 'twohitfreqimpedance') >
-                        (self.config.allowabletwohits - t.twohitsthusfar)):
-                    continue
-
-                curScore *= (1.0 + (numTwoHits + numTwoHitsLoose / 2) * t.twohitsthusfar *
-                             params.tryGetParam(t.track_id, 'twohitfreqimpedance'))
-
-                # Impede score if too many ladders/chutes are getting cancelled
-                if instType != en.InstanceEventType.CHUTEANDLADDER and t.cancels >= self.config.whenstartworryingaboutcancels:
-                    if t.cancels >= 2.5 * self.config.whenstartworryingaboutcancels: continue
-                    curScore *= (1.0 + params.tryGetParam(t.track_id, 'cancelimpedance') * (t.cancels + 1)
-                                 / (t.eventscount + 1))
-
-                # Preferentially weight based on proximity to end of track
-                endTrackWeight = params.tryGetParam(t.track_id, 'eventstowardsendoftrackreward')
-                eventPosRelMidpoints = candEventSpecs['event'].midPointNum / t.tracklength - 0.5
-                if eventPosRelMidpoints < 0:
-                    curScore *= (1.0 + abs(eventPosRelMidpoints) * endTrackWeight)
-                else:
-                    curScore /= (1.0 + abs(eventPosRelMidpoints) * endTrackWeight)
-
-                # Factor in distribution of length histogram to help ensure distributed lengths
-                # Try to curve fit specified ideal histo
-                # NOTE: golf-stylee, lower score is better
-                curLenPerc = 0.0
-                curLength = candEventSpecs['length']
-                if sum([h[1] for h in self.allTentLengthHisto]) > 0:
-                    curLenPerc = (self.allTentLengthHisto[curLength - 1][1] /
-                                  sum([h[1] for h in self.allTentLengthHisto]))
-                idealPerc = t.lengthdistidealcurve[curLength - 1][1]
-                lenDistDisp = curLenPerc - idealPerc
-                if lenDistDisp < 0:
-                    # Need more!
-                    curScore /= (1.0 + abs(lenDistDisp)) * params.tryGetParam(t.track_id,
-                                                                              'lengthhistogramscoringfactor')
-                elif lenDistDisp > 0:
-                    # Too many of this length already, downshift
-                    curScore *= (1.0 + abs(lenDistDisp)) * params.tryGetParam(t.track_id,
-                                                                              'lengthhistogramscoringfactor')
-
-                # Factor in distribution of length over time
-                # TEMP!!
-                if len(t.lengthovertimeideal) < hole.num:
-                    print("FAILED LENGTH OVER TIME TEST: hole.num {}".format(hole.num))
-                else:
-                    idealLengthForHole = t.lengthovertimeideal[hole.num - 1][1]
-                    scoreMod = (1.0 + (abs(curLength - idealLengthForHole) / t.maxlength) *
-                                params.tryGetParam(t.track_id, 'lengthovertimescoringfactor'))
-                    if curScore >= 0:
-                        curScore *= scoreMod
-                    else:
-                        curScore /= scoreMod
-
-                # Aggr into avg score
-                self.avgScoreSum += curScore
-                self.avgScoreDiv += 1
-                self.avgScore = self.avgScoreSum / self.avgScoreDiv
-
-                # Elminate options based on shortening & lengthening control
-                if (curEstLengthDiscr > 0 and shorteningControl > 0.5 and curScore > self.avgScore
-                        * self.config.goodscorecutoffperc * 2 * (
-                                1.0 - (2 * (shorteningControl - 0.5)))):
-                    t.numnogos += 1
-                    continue
-                elif (curEstLengthDiscr < 0 and lengtheningControl > 0.5 and curScore > self.avgScore
-                      * self.config.goodscorecutoffperc * 2 * (
-                              1.0 - (2 * (lengtheningControl - 0.5)))):
-                    t.numnogos += 1
-                    continue
-
-                eventFitnesses.append(dict(event=candEventSpecs['event'],
-                                           eventspecs=candEventSpecs,
-                                           score=curScore, effnetenergy=effNetEnergy,
-                                           effcompmodulation=effCompModulation,
-                                           insttype=instType,
-                                           instchute=instType in (en.InstanceEventType.CHUTEANDLADDER,
-                                                                  en.InstanceEventType.CHUTEONLY),
-                                           instladder=instType in (en.InstanceEventType.CHUTEANDLADDER,
-                                                                   en.InstanceEventType.LADDERONLY),
-                                           lasteventtop=0
-                                           ,
-                                           twohits=numTwoHits, estefflength=effLengthForecast
-                                           ))
+                fitness = self._score_candidate_instance(
+                    t, hole, candEventSpecs, instType,
+                    canBeChute, canBeChuteOnly, canBeLadder, canBeLadderOnly,
+                    chutes, chuteBases, chuteTops, ladders, ladderBases, ladderTops,
+                    params, explicitEvent, explicitChute, explicitLadder)
+                if fitness is not None:
+                    eventFitnesses.append(fitness)
 
             t.candcursor += 1
 

@@ -498,6 +498,47 @@ extensions). `pytest -m integration` is the rest.
   larger fixture (see the Phase 8 step 1 section above) -- this was the
   practical way to get a real, passing characterization test for this
   specific behavior without that larger undertaking.
+- Refactor Mk II Phase 8 step 4, done (last step of Phase 8 -- see
+  [[Refactor Mk ii]] in the Obsidian vault): `scoreEventsForHole`'s
+  per-instance-type scoring body (the CHUTEONLY/LADDERONLY/
+  CHUTEANDLADDER loop: balance scoring, energy-buffer scoring, two-hit
+  detection, cancel impedance, end-of-track weighting, length-histogram
+  scoring, length-over-time scoring -- everything after the candidate-
+  gating/cursor-walking code, which stays in `scoreEventsForHole`
+  unchanged) is now `_score_candidate_instance(t, hole, candEventSpecs,
+  instType, ..., params, explicitEvent, explicitChute, explicitLadder)
+  -> dict | None`, called once per instType from a now much shorter
+  loop in `scoreEventsForHole`. Pure code motion: every `continue` in
+  the original loop body became a `return None` (caller: `if fitness is
+  not None: eventFitnesses.append(fitness)`), and the original
+  `eventFitnesses.append(dict(...))` became `return dict(...)`.
+
+  Locked in with a golden/characterization test built *before* the
+  extraction (same approach Phase 7 used for `PossibleEvents.buildSet`,
+  and Phase 8 step 1 for `_build_track_state`):
+  `test_score_events_for_hole_returns_expected_fitness_for_explicit_
+  ladder_event` calls the real (pre-refactor) `scoreEventsForHole`
+  through its existing `explicitEvent` seam -- which bypasses the
+  candidate-cursor/`candeventspecs` machinery entirely, going straight
+  to the per-instType scoring body this step touches -- with
+  config/state values chosen so every intermediate branch collapses to
+  a known constant (`curEstLengthDiscr == 0`, `eventPosRelMidpoints ==
+  0`, `lenDistDisp == 0`, `scoreMod == 1.0`, all verified by hand-tracing
+  the method against these exact inputs), leaving a score (1.1) anyone
+  can re-derive by hand rather than "whatever the code happens to
+  produce". `runPartialTrackEffLengthHoles` (needs a real Optimizer db
+  and/or the compiled `markovgame` extension) is mocked to a fixed
+  value, same pattern the Phase 8 step 1 test already uses. Passed
+  unchanged against the post-extraction code.
+
+  This is the last of Phase 8's four steps (setup preamble ->
+  `TrackBuildState` -> two-hit dedup -> scoring-body extraction);
+  `EventSetBuilder.py`'s largest method (`scoreEventsForHole`, 473
+  lines before Phase 8) is now three much smaller, independently named
+  pieces. Phase 9 (the `EventSetBuilder` Category A collision-tracking
+  redesign -- `allVectorsTest`/`baseVectorsTest`/`tryEventSet`'s main
+  placement loop) remains separately scoped future work per the Mk II
+  plan, not started here.
 
 ## Fixtures
 

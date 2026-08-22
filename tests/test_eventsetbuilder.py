@@ -59,6 +59,7 @@
 
 import sqlite3
 import tempfile
+import types
 import unittest
 import unittest.mock as mock
 from pathlib import Path
@@ -683,6 +684,103 @@ def test_scan_two_hits_for_direction_guarded_length_rejection_after_counting():
     assert invalid is True
     assert num_hits == 1  # counted before the length check rejected it
     assert net_lengths == []  # net length never appended
+
+
+# ---------------------------------------------------------------------
+# scoreEventsForHole -- Phase 8 step 4 golden/characterization test
+# ---------------------------------------------------------------------
+# Locked in *before* the Phase 8 step 4 extraction (per-instance-type
+# scoring body -> _score_candidate_instance), same golden-test-first
+# approach Phase 7 used for PossibleEvents.buildSet. Uses the
+# `explicitEvent` seam scoreEventsForHole already has (bypasses the
+# candidate-cursor/candeventspecs machinery entirely, going straight to
+# the per-instType scoring body) to get a real, deterministic run
+# without needing a full candidate-list/cursor fixture. Config/state
+# values are chosen so every intermediate branch collapses to a known
+# constant (curEstLengthDiscr == 0, eventPosRelMidpoints == 0, lenDistDisp
+# == 0, scoreMod == 1.0) -- verified by hand-tracing scoreEventsForHole's
+# body line by line against these exact inputs -- so the final score
+# (1.1) is arithmetic anyone can re-derive, not just "whatever the code
+# happens to produce".
+
+def _fake_candidate_event(start, end, length, is_ortho=True, crow_length=100, mid_point_num=0.0):
+    return types.SimpleNamespace(
+        startHole=types.SimpleNamespace(num=start),
+        endHole=types.SimpleNamespace(num=end),
+        length=length,
+        isOrtho=is_ortho,
+        crowLength=crow_length,
+        midPointNum=mid_point_num,
+    )
+
+
+def test_score_events_for_hole_returns_expected_fitness_for_explicit_ladder_event():
+    builder = object.__new__(EventSetBuilder)
+    builder.config = GameConfig()  # defaults: effectiveboardlength=120, maxefflengthdisp=24, etc.
+    builder.avgScoreSum, builder.avgScoreDiv, builder.avgScore = 0.0, 0, 0.0
+    builder.scoringTime = 0.0
+    # sum(h[1] for h in allTentLengthHisto) == 0 -> curLenPerc forced to
+    # its 0.0 default, independent of curLength/maxlength.
+    builder.allTentLengthHisto = [[1, 0], [2, 0], [3, 0], [4, 0]]
+    # Real Markov-chain simulation (needs a real Optimizer db and/or the
+    # compiled markovgame extension) mocked to a fixed value -- same
+    # pattern the Phase 8 step 1 _build_track_state test already uses.
+    builder.runPartialTrackEffLengthHoles = mock.MagicMock(return_value=(120, []))
+
+    state = TrackBuildState(
+        track=mock.MagicMock(), trackidx=0, tracknum=1, track_id=7,
+        tracklength=120, controllength=120, curestefflength=120,
+        energybuffer=0.0, twohitsthusfar=0, cancels=0, eventscount=0,
+        numnogos=0, numdenies=0, candcursor=0, eventsetbuild=[],
+        # idealPerc for curLength=3 forced to 0.0 to match curLenPerc's
+        # forced-0.0 above -> lenDistDisp == 0.
+        lengthdistidealcurve=[[1, 0.0], [2, 0.0], [3, 0.0], [4, 0.0]],
+        # idealLengthForHole == curLength (3) at hole.num == 5 -> scoreMod == 1.0.
+        lengthovertimeideal=[[i + 1, 3] for i in range(120)],
+        maxlength=4,
+    )
+
+    hole = types.SimpleNamespace(num=5)
+    # midPointNum == tracklength / 2 -> eventPosRelMidpoints == 0 exactly.
+    event = _fake_candidate_event(start=3, end=6, length=3, mid_point_num=60.0)
+    explicit_event = {'event': event, 'length': 3}
+
+    param_values = {
+        'balanceandefflengthcontrolfactor': 0.5,
+        'energybufferenforcement': 0.1,
+        'twohitfreqimpedance': 0.0,
+        'cancelimpedance': 0.1,
+        'eventstowardsendoftrackreward': 0.1,
+        'lengthhistogramscoringfactor': 0.1,
+        'lengthovertimescoringfactor': 0.1,
+    }
+    params = mock.MagicMock()
+    params.tryGetParam.side_effect = lambda track_id, name, optional=False: param_values[name]
+
+    result = builder.scoreEventsForHole(
+        state, hole,
+        chutes=[], chuteBases=[], chuteTops=[], ladders=[], ladderBases=[], ladderTops=[],
+        params=params, trackEventsOverview=[state],
+        explicitEvent=explicit_event, explicitChute=False, explicitLadder=True)
+
+    assert result is not None
+    assert len(result) == 1
+    fitness = result[0]
+    assert fitness['insttype'] == en.InstanceEventType.LADDERONLY
+    assert fitness['instladder'] is True
+    assert fitness['instchute'] is False
+    assert fitness['event'] is event
+    assert fitness['eventspecs'] is explicit_event
+    assert fitness['effnetenergy'] == 3  # effEnergy(3) + abs(effCompModulation(0))
+    assert fitness['effcompmodulation'] == 0
+    assert fitness['twohits'] == 0
+    assert fitness['estefflength'] == 120
+    # energy-buffer scoring only nontrivial factor: 1.0 * (1 + 0.1*|3-0|/3)
+    assert fitness['score'] == pytest.approx(1.1)
+
+    builder.runPartialTrackEffLengthHoles.assert_called_once_with(
+        7, [], 120, tentNewLadder=(3, 6), readMode=True)
+    assert state.candcursor == 1
 
 
 if __name__ == '__main__':
