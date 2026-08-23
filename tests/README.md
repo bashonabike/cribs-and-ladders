@@ -601,6 +601,50 @@ extensions). `pytest -m integration` is the rest.
   already has dedicated coverage via `PossibleEvents`' own tests, so
   wasn't re-derived here).
 
+- Refactor Mk II Phase 10, done (opportunistic cleanup -- see
+  [[Refactor Mk ii]] in the Obsidian vault): `config.py`'s
+  `_compute_derived` had four near-identical if/elif branches (one per
+  `numplayers` x `twodecks` combination), each doing ~18 repeated
+  `self.probHandHist.append(dict(move=..., prob=...))` /
+  `self.probPegHist.append(...)` calls plus setting `dealsize`/
+  `handsize`/`discardsize`/`cribstartsize`/`avgMovesPerPegging`/
+  `ideallikelihoodholehit` -- i.e. literal data shaped like code. Moved
+  into a module-level `_RULESET_TABLES` dict keyed by `(numplayers,
+  twodecks)`; `_compute_derived` now does one table lookup (raising the
+  same `ValueError` for an unconfigured player count) instead of
+  branching. Values are unchanged -- verified by running both the old
+  and refactored `GameConfig._compute_derived` side by side for all
+  four rulesets and asserting `probHandHist`/`probPegHist`/
+  `avgMovesPerPegging`/`ideallikelihoodholehit`/`probPegRounds`/
+  `flushmods` come out byte-identical.
+
+  Also gave `CribbageGame.pegging`'s `attempts > 1000` stuck-loop guard
+  a name (`PEGGING_STUCK_LOOP_LIMIT`) and a comment explaining what
+  "stuck" means here (every full round-robin should either find a
+  playable player or reset the pegging total to zero, so tripping the
+  guard means a bug left every player permanently unable to play, not a
+  legitimately long round) -- behavior unchanged, still raises the same
+  `Exception("Max attempts")`.
+
+  New tests in `test_config.py`:
+  `test_prob_hand_and_peg_hist_shape_for_each_ruleset` (parametrized
+  over all four `(numplayers, twodecks)` combos -- move sequence,
+  length, and that `probPegHist` sums to ~1.0 while `probHandHist`
+  sums to ~0.99-0.996, which is pre-existing empirical-data behavior,
+  not something this refactor changed) and
+  `test_prob_hist_instances_are_independent` (mutating one
+  `GameConfig`'s `probHandHist` doesn't leak into a later instance built
+  from the same `_RULESET_TABLES` entry). No new test for the
+  `pegging()` guard itself -- it had none before, and the guard's
+  runtime behavior is unchanged by this phase (rename + comment only).
+
+  Sandbox note: this sandbox has no network access to install pytest,
+  so these tests were verified by hand -- running the equivalent
+  assertions directly via `python3 -c` (including the old-vs-new
+  `GameConfig` diff above) -- rather than via `pytest` itself. Worth an
+  actual `pytest` run on a machine with the dev deps installed before
+  treating this as fully confirmed.
+
 ## Fixtures
 
 Defined in the root `conftest.py` so they're available everywhere:

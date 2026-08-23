@@ -83,6 +83,34 @@ class TestGameConfigDerivation:
         assert b.flushmods[0][0] != 12345.0
         assert a.numplayers != b.numplayers
 
+    @pytest.mark.parametrize("numplayers,twodecks", [(2, False), (2, True), (3, False), (3, True)])
+    def test_prob_hand_and_peg_hist_shape_for_each_ruleset(self, numplayers, twodecks):
+        # Phase 10: probHandHist/probPegHist come from the _RULESET_TABLES
+        # lookup now instead of four near-identical append-heavy branches.
+        # Pin down the shape (move/prob dicts, expected lengths, roughly
+        # normalized probabilities) for every (numplayers, twodecks) combo.
+        cfg = GameConfig(numplayers=numplayers, twodecks=twodecks)
+        assert len(cfg.probHandHist) == 19
+        assert len(cfg.probPegHist) == 14
+        assert [entry["move"] for entry in cfg.probHandHist] == list(range(1, 20))
+        assert [entry["move"] for entry in cfg.probPegHist] == list(range(1, 15))
+        # probPegHist is a proper normalized distribution; probHandHist is
+        # empirical and, pre-existing (not introduced by this refactor),
+        # only sums to ~0.99-0.996 rather than exactly 1 -- preserved
+        # verbatim from the original game_params.py data, not "fixed" here.
+        assert sum(entry["prob"] for entry in cfg.probPegHist) == pytest.approx(1.0, abs=1e-6)
+        assert 0.98 <= sum(entry["prob"] for entry in cfg.probHandHist) <= 1.0
+
+    def test_prob_hist_instances_are_independent(self):
+        # The four rulesets live in a module-level lookup table
+        # (_RULESET_TABLES) shared across every GameConfig instance;
+        # mutating one instance's probHandHist must not leak into
+        # another instance built from the same ruleset afterward.
+        a = GameConfig(numplayers=3, twodecks=False)
+        a.probHandHist[0]["prob"] = 999.0
+        b = GameConfig(numplayers=3, twodecks=False)
+        assert b.probHandHist[0]["prob"] != 999.0
+
     def test_data_root_overridable_per_instance(self, tmp_path):
         cfg = GameConfig(data_root=tmp_path)
         assert cfg.db_path == str(tmp_path / "Boards" / "AllBoards.db")

@@ -56,6 +56,188 @@ def _normal_pdf(x: float, mean: float, std: float) -> float:
     return (1.0 / (std * math.sqrt(2.0 * math.pi))) * math.exp(-0.5 * ((x - mean) / std) ** 2)
 
 
+# Per-(numplayers, twodecks) ruleset data: deal/hand/discard/crib sizes,
+# the empirically-measured pegging-move and hand-move probability
+# histograms, and the two scalars derived from them
+# (avgMovesPerPegging, ideallikelihoodholehit). This used to be four
+# near-identical if/elif branches in _compute_derived, each repeating
+# the same `self.probHandHist.append(dict(move=..., prob=...))` /
+# `self.probPegHist.append(dict(move=..., prob=...))` pattern ~18
+# times -- i.e. it was data shaped like code. Phase 10 of the Mk II
+# refactor plan moves it into an actual lookup table instead; the
+# values themselves are unchanged from the original game_params.py.
+_RULESET_TABLES = {
+    (2, False): dict(
+        dealsize=6, handsize=4, discardsize=2, cribstartsize=0,
+        avgMovesPerPegging=2.335944235958582,
+        ideallikelihoodholehit=0.28325666666666666,
+        probHandHist=[
+            (1, 0.00236094059873454),
+            (2, 0.117287236325861),
+            (3, 0.0236480395607792),
+            (4, 0.150709569965402),
+            (5, 0.0431622867641377),
+            (6, 0.154135080143202),
+            (7, 0.0618566436868448),
+            (8, 0.155100919479048),
+            (9, 0.0525760008241829),
+            (10, 0.0703216888881258),
+            (11, 0.0108302784192859),
+            (12, 0.0828175035843371),
+            (13, 0.00565337957915161),
+            (14, 0.0259059572970235),
+            (15, 0.00135217507018433),
+            (16, 0.0242747619742615),
+            (17, 0.00438276427510538),
+            (18, 0.00387194258192464),
+            (19, 0.000321946445281982),
+        ],
+        probPegHist=[
+            (1, 0.749741528628781),
+            (2, 0.203735862399241),
+            (3, 0.0304929082616849),
+            (4, 0.00654570355683461),
+            (5, 0.00252652968056967),
+            (6, 0.00659717404634134),
+            (7, 0.0000604218789861656),
+            (8, 0.00000447569473971597),
+            (9, 0.0000201406263287219),
+            (10, 0),
+            (11, 0),
+            (12, 0.000228260431725515),
+            (13, 0),
+            (14, 0.0000469947947670177),
+        ],
+    ),
+    (2, True): dict(
+        dealsize=6, handsize=4, discardsize=2, cribstartsize=0,
+        avgMovesPerPegging=2.342926086134056,
+        ideallikelihoodholehit=0.28256333333333333,
+        probHandHist=[
+            (1, 0.002381436036184),
+            (2, 0.116997229581671),
+            (3, 0.0234297000946524),
+            (4, 0.150510215107208),
+            (5, 0.0434147458865123),
+            (6, 0.15384681877315),
+            (7, 0.0629805552073924),
+            (8, 0.154326563600766),
+            (9, 0.0524564231781582),
+            (10, 0.0707602010606251),
+            (11, 0.0112502323088692),
+            (12, 0.0825333984518505),
+            (13, 0.00588227667013869),
+            (14, 0.0257506277742001),
+            (15, 0.00132686182052357),
+            (16, 0.0249078328067666),
+            (17, 0.0037644841878698),
+            (18, 0.00421829686264171),
+            (19, 0.000280931655811179),
+        ],
+        probPegHist=[
+            (1, 0.806566806974083),
+            (2, 0.146543923919091),
+            (3, 0.0294897498609172),
+            (4, 0.00809514312406185),
+            (5, 0.00307976529123411),
+            (6, 0.00593070003254012),
+            (7, 0.0000356891683374096),
+            (8, 0.00000839745137350814),
+            (9, 0),
+            (10, 0),
+            (11, 0),
+            (12, 0.000199439470120818),
+            (13, 0),
+            (14, 0.0000503847082410488),
+        ],
+    ),
+    (3, False): dict(
+        dealsize=5, handsize=4, discardsize=1, cribstartsize=1,
+        avgMovesPerPegging=2.115606979222163,
+        ideallikelihoodholehit=0.30000583333333336,
+        probHandHist=[
+            (1, 0.00360317408125911),
+            (2, 0.156059908591721),
+            (3, 0.0302776225079188),
+            (4, 0.188904963886058),
+            (5, 0.0494251361807999),
+            (6, 0.159432917940793),
+            (7, 0.0671670009535396),
+            (8, 0.140123740944114),
+            (9, 0.0463754534793235),
+            (10, 0.0537023641206063),
+            (11, 0.00823660934468813),
+            (12, 0.0539407490217999),
+            (13, 0.00376483740505705),
+            (14, 0.0161224914784248),
+            (15, 0.000843937351351944),
+            (16, 0.0131166496783174),
+            (17, 0.0022386260261511),
+            (18, 0.00197832067427306),
+            (19, 0.000139742873113471),
+        ],
+        probPegHist=[
+            (1, 0.730293050282142),
+            (2, 0.226196219924063),
+            (3, 0.0274142910085097),
+            (4, 0.0069140567640704),
+            (5, 0.00363883003643025),
+            (6, 0.00523309069804843),
+            (7, 0.0000699237132288673),
+            (8, 0.00000279694852915469),
+            (9, 0.00000279694852915469),
+            (10, 0),
+            (11, 0),
+            (12, 0.000173410808807591),
+            (13, 0),
+            (14, 0.0000615328676414032),
+        ],
+    ),
+    (3, True): dict(
+        dealsize=5, handsize=4, discardsize=1, cribstartsize=1,
+        avgMovesPerPegging=2.1183971225589944,
+        ideallikelihoodholehit=0.2989738888888889,
+        probHandHist=[
+            (1, 0.00351686998571272),
+            (2, 0.155440158259149),
+            (3, 0.0310830860534125),
+            (4, 0.187973953181668),
+            (5, 0.0492718980107704),
+            (6, 0.159152104626882),
+            (7, 0.0673865259918672),
+            (8, 0.140270908891087),
+            (9, 0.0456533685020332),
+            (10, 0.0546680953950984),
+            (11, 0.00841850752829981),
+            (12, 0.0542642048576767),
+            (13, 0.00372843169579075),
+            (14, 0.0157462358500934),
+            (15, 0.000813276184196065),
+            (16, 0.013353115727003),
+            (17, 0.00224749972524453),
+            (18, 0.00214858775689636),
+            (19, 0.000173095944609298),
+        ],
+        probPegHist=[
+            (1, 0.727272982511308),
+            (2, 0.22676339868547),
+            (3, 0.0287304203294466),
+            (4, 0.00777150429706912),
+            (5, 0.00443043127918175),
+            (6, 0.00472242421519879),
+            (7, 0.0000926516046977171),
+            (8, 0.00000421143657716896),
+            (9, 0.00000140381219238965),
+            (10, 0),
+            (11, 0),
+            (12, 0.000172668899663927),
+            (13, 0),
+            (14, 0.0000379029291945206),
+        ],
+    ),
+}
+
+
 @dataclass
 class GameConfig:
     # ---- user-settable trial params (mirrors old game_params.py) ----
@@ -130,10 +312,12 @@ class GameConfig:
         self._compute_derived()
 
     # The rest of this mirrors the "DO NOT MODIFY BELOW" derived section
-    # of the old game_params.py 1:1 -- same branching, same literal
-    # lookup tables -- just reading/writing self.* instead of module
-    # globals, so the derivation logic is unchanged and easy to diff
-    # against the original if needed.
+    # of the old game_params.py -- same values, same formulas -- just
+    # reading/writing self.* instead of module globals. The
+    # numplayers/twodecks ruleset branch (probHandHist/probPegHist/
+    # dealsize/etc.) was moved to the _RULESET_TABLES lookup above in
+    # Phase 10 of the Mk II refactor; everything else here is unchanged
+    # and easy to diff against the original if needed.
     def _compute_derived(self):
         self.flushmods = [[0.0] * 21 for _ in range(3)]
 
@@ -161,169 +345,18 @@ class GameConfig:
                     self.flushmods[d][r] = ((20 - r) / 10.0) * self.flushmods[d][10] + \
                         ((r - 10) / 10.0) * math.pow(self.flushmods[d][10], 2)
 
-        self.probHandHist: List[dict] = []
-        self.probPegHist: List[dict] = []
-
-        if self.numplayers == 2:
-            self.dealsize = 6
-            self.handsize = 4
-            self.discardsize = 2
-            self.cribstartsize = 0
-            if not self.twodecks:
-                self.probHandHist.append(dict(move=1, prob=0.00236094059873454))
-                self.probHandHist.append(dict(move=2, prob=0.117287236325861))
-                self.probHandHist.append(dict(move=3, prob=0.0236480395607792))
-                self.probHandHist.append(dict(move=4, prob=0.150709569965402))
-                self.probHandHist.append(dict(move=5, prob=0.0431622867641377))
-                self.probHandHist.append(dict(move=6, prob=0.154135080143202))
-                self.probHandHist.append(dict(move=7, prob=0.0618566436868448))
-                self.probHandHist.append(dict(move=8, prob=0.155100919479048))
-                self.probHandHist.append(dict(move=9, prob=0.0525760008241829))
-                self.probHandHist.append(dict(move=10, prob=0.0703216888881258))
-                self.probHandHist.append(dict(move=11, prob=0.0108302784192859))
-                self.probHandHist.append(dict(move=12, prob=0.0828175035843371))
-                self.probHandHist.append(dict(move=13, prob=0.00565337957915161))
-                self.probHandHist.append(dict(move=14, prob=0.0259059572970235))
-                self.probHandHist.append(dict(move=15, prob=0.00135217507018433))
-                self.probHandHist.append(dict(move=16, prob=0.0242747619742615))
-                self.probHandHist.append(dict(move=17, prob=0.00438276427510538))
-                self.probHandHist.append(dict(move=18, prob=0.00387194258192464))
-                self.probHandHist.append(dict(move=19, prob=0.000321946445281982))
-                self.probPegHist.append(dict(move=1, prob=0.749741528628781))
-                self.probPegHist.append(dict(move=2, prob=0.203735862399241))
-                self.probPegHist.append(dict(move=3, prob=0.0304929082616849))
-                self.probPegHist.append(dict(move=4, prob=0.00654570355683461))
-                self.probPegHist.append(dict(move=5, prob=0.00252652968056967))
-                self.probPegHist.append(dict(move=6, prob=0.00659717404634134))
-                self.probPegHist.append(dict(move=7, prob=0.0000604218789861656))
-                self.probPegHist.append(dict(move=8, prob=0.00000447569473971597))
-                self.probPegHist.append(dict(move=9, prob=0.0000201406263287219))
-                self.probPegHist.append(dict(move=10, prob=0))
-                self.probPegHist.append(dict(move=11, prob=0))
-                self.probPegHist.append(dict(move=12, prob=0.000228260431725515))
-                self.probPegHist.append(dict(move=13, prob=0))
-                self.probPegHist.append(dict(move=14, prob=0.0000469947947670177))
-
-                self.avgMovesPerPegging = 2.335944235958582
-                self.ideallikelihoodholehit = 0.28325666666666666
-            else:
-                self.probHandHist.append(dict(move=1, prob=0.002381436036184))
-                self.probHandHist.append(dict(move=2, prob=0.116997229581671))
-                self.probHandHist.append(dict(move=3, prob=0.0234297000946524))
-                self.probHandHist.append(dict(move=4, prob=0.150510215107208))
-                self.probHandHist.append(dict(move=5, prob=0.0434147458865123))
-                self.probHandHist.append(dict(move=6, prob=0.15384681877315))
-                self.probHandHist.append(dict(move=7, prob=0.0629805552073924))
-                self.probHandHist.append(dict(move=8, prob=0.154326563600766))
-                self.probHandHist.append(dict(move=9, prob=0.0524564231781582))
-                self.probHandHist.append(dict(move=10, prob=0.0707602010606251))
-                self.probHandHist.append(dict(move=11, prob=0.0112502323088692))
-                self.probHandHist.append(dict(move=12, prob=0.0825333984518505))
-                self.probHandHist.append(dict(move=13, prob=0.00588227667013869))
-                self.probHandHist.append(dict(move=14, prob=0.0257506277742001))
-                self.probHandHist.append(dict(move=15, prob=0.00132686182052357))
-                self.probHandHist.append(dict(move=16, prob=0.0249078328067666))
-                self.probHandHist.append(dict(move=17, prob=0.0037644841878698))
-                self.probHandHist.append(dict(move=18, prob=0.00421829686264171))
-                self.probHandHist.append(dict(move=19, prob=0.000280931655811179))
-                self.probPegHist.append(dict(move=1, prob=0.806566806974083))
-                self.probPegHist.append(dict(move=2, prob=0.146543923919091))
-                self.probPegHist.append(dict(move=3, prob=0.0294897498609172))
-                self.probPegHist.append(dict(move=4, prob=0.00809514312406185))
-                self.probPegHist.append(dict(move=5, prob=0.00307976529123411))
-                self.probPegHist.append(dict(move=6, prob=0.00593070003254012))
-                self.probPegHist.append(dict(move=7, prob=0.0000356891683374096))
-                self.probPegHist.append(dict(move=8, prob=0.00000839745137350814))
-                self.probPegHist.append(dict(move=9, prob=0))
-                self.probPegHist.append(dict(move=10, prob=0))
-                self.probPegHist.append(dict(move=11, prob=0))
-                self.probPegHist.append(dict(move=12, prob=0.000199439470120818))
-                self.probPegHist.append(dict(move=13, prob=0))
-                self.probPegHist.append(dict(move=14, prob=0.0000503847082410488))
-
-                self.avgMovesPerPegging = 2.342926086134056
-                self.ideallikelihoodholehit = 0.28256333333333333
-        elif self.numplayers == 3:
-            self.dealsize = 5
-            self.handsize = 4
-            self.discardsize = 1
-            self.cribstartsize = 1
-            if not self.twodecks:
-                self.probHandHist.append(dict(move=1, prob=0.00360317408125911))
-                self.probHandHist.append(dict(move=2, prob=0.156059908591721))
-                self.probHandHist.append(dict(move=3, prob=0.0302776225079188))
-                self.probHandHist.append(dict(move=4, prob=0.188904963886058))
-                self.probHandHist.append(dict(move=5, prob=0.0494251361807999))
-                self.probHandHist.append(dict(move=6, prob=0.159432917940793))
-                self.probHandHist.append(dict(move=7, prob=0.0671670009535396))
-                self.probHandHist.append(dict(move=8, prob=0.140123740944114))
-                self.probHandHist.append(dict(move=9, prob=0.0463754534793235))
-                self.probHandHist.append(dict(move=10, prob=0.0537023641206063))
-                self.probHandHist.append(dict(move=11, prob=0.00823660934468813))
-                self.probHandHist.append(dict(move=12, prob=0.0539407490217999))
-                self.probHandHist.append(dict(move=13, prob=0.00376483740505705))
-                self.probHandHist.append(dict(move=14, prob=0.0161224914784248))
-                self.probHandHist.append(dict(move=15, prob=0.000843937351351944))
-                self.probHandHist.append(dict(move=16, prob=0.0131166496783174))
-                self.probHandHist.append(dict(move=17, prob=0.0022386260261511))
-                self.probHandHist.append(dict(move=18, prob=0.00197832067427306))
-                self.probHandHist.append(dict(move=19, prob=0.000139742873113471))
-                self.probPegHist.append(dict(move=1, prob=0.730293050282142))
-                self.probPegHist.append(dict(move=2, prob=0.226196219924063))
-                self.probPegHist.append(dict(move=3, prob=0.0274142910085097))
-                self.probPegHist.append(dict(move=4, prob=0.0069140567640704))
-                self.probPegHist.append(dict(move=5, prob=0.00363883003643025))
-                self.probPegHist.append(dict(move=6, prob=0.00523309069804843))
-                self.probPegHist.append(dict(move=7, prob=0.0000699237132288673))
-                self.probPegHist.append(dict(move=8, prob=0.00000279694852915469))
-                self.probPegHist.append(dict(move=9, prob=0.00000279694852915469))
-                self.probPegHist.append(dict(move=10, prob=0))
-                self.probPegHist.append(dict(move=11, prob=0))
-                self.probPegHist.append(dict(move=12, prob=0.000173410808807591))
-                self.probPegHist.append(dict(move=13, prob=0))
-                self.probPegHist.append(dict(move=14, prob=0.0000615328676414032))
-
-                self.avgMovesPerPegging = 2.115606979222163
-                self.ideallikelihoodholehit = 0.30000583333333336
-            else:
-                self.probHandHist.append(dict(move=1, prob=0.00351686998571272))
-                self.probHandHist.append(dict(move=2, prob=0.155440158259149))
-                self.probHandHist.append(dict(move=3, prob=0.0310830860534125))
-                self.probHandHist.append(dict(move=4, prob=0.187973953181668))
-                self.probHandHist.append(dict(move=5, prob=0.0492718980107704))
-                self.probHandHist.append(dict(move=6, prob=0.159152104626882))
-                self.probHandHist.append(dict(move=7, prob=0.0673865259918672))
-                self.probHandHist.append(dict(move=8, prob=0.140270908891087))
-                self.probHandHist.append(dict(move=9, prob=0.0456533685020332))
-                self.probHandHist.append(dict(move=10, prob=0.0546680953950984))
-                self.probHandHist.append(dict(move=11, prob=0.00841850752829981))
-                self.probHandHist.append(dict(move=12, prob=0.0542642048576767))
-                self.probHandHist.append(dict(move=13, prob=0.00372843169579075))
-                self.probHandHist.append(dict(move=14, prob=0.0157462358500934))
-                self.probHandHist.append(dict(move=15, prob=0.000813276184196065))
-                self.probHandHist.append(dict(move=16, prob=0.013353115727003))
-                self.probHandHist.append(dict(move=17, prob=0.00224749972524453))
-                self.probHandHist.append(dict(move=18, prob=0.00214858775689636))
-                self.probHandHist.append(dict(move=19, prob=0.000173095944609298))
-                self.probPegHist.append(dict(move=1, prob=0.727272982511308))
-                self.probPegHist.append(dict(move=2, prob=0.22676339868547))
-                self.probPegHist.append(dict(move=3, prob=0.0287304203294466))
-                self.probPegHist.append(dict(move=4, prob=0.00777150429706912))
-                self.probPegHist.append(dict(move=5, prob=0.00443043127918175))
-                self.probPegHist.append(dict(move=6, prob=0.00472242421519879))
-                self.probPegHist.append(dict(move=7, prob=0.0000926516046977171))
-                self.probPegHist.append(dict(move=8, prob=0.00000421143657716896))
-                self.probPegHist.append(dict(move=9, prob=0.00000140381219238965))
-                self.probPegHist.append(dict(move=10, prob=0))
-                self.probPegHist.append(dict(move=11, prob=0))
-                self.probPegHist.append(dict(move=12, prob=0.000172668899663927))
-                self.probPegHist.append(dict(move=13, prob=0))
-                self.probPegHist.append(dict(move=14, prob=0.0000379029291945206))
-
-                self.avgMovesPerPegging = 2.1183971225589944
-                self.ideallikelihoodholehit = 0.2989738888888889
-        else:
+        ruleset = _RULESET_TABLES.get((self.numplayers, self.twodecks))
+        if ruleset is None:
             raise ValueError(f"{self.numplayers} player play is not configured yet")
+
+        self.dealsize = ruleset["dealsize"]
+        self.handsize = ruleset["handsize"]
+        self.discardsize = ruleset["discardsize"]
+        self.cribstartsize = ruleset["cribstartsize"]
+        self.probHandHist: List[dict] = [dict(move=m, prob=p) for m, p in ruleset["probHandHist"]]
+        self.probPegHist: List[dict] = [dict(move=m, prob=p) for m, p in ruleset["probPegHist"]]
+        self.avgMovesPerPegging = ruleset["avgMovesPerPegging"]
+        self.ideallikelihoodholehit = ruleset["ideallikelihoodholehit"]
 
         # Discretized normal distribution of avg moves per pegging, for
         # the markov chain mini-model. Originally computed with

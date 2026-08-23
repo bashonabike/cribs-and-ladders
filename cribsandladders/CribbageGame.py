@@ -13,6 +13,18 @@ import itertools as it
 
 PAIR_SCORES = {2: ("Pair", 2), 3: ("3 of a kind", 6), 4: ("Four of a kind", 12)}
 
+# Safety-net cap on pegging()'s inner "find a player who can still play"
+# loop. That loop should always terminate on its own -- every full
+# round-robin either finds a playable player or trips
+# cannotPlayCounter >= numplayers and resets the pegging total to 0 --
+# so "stuck" here means a bug elsewhere left every player permanently
+# unable to play with the total never resetting, not a legitimate long
+# pegging round. 1000 iterations is far beyond anything a real game
+# should ever reach; hitting it means fail loud rather than hang.
+# Phase 10 of the Mk II refactor plan -- named/commented, guard
+# behavior unchanged.
+PEGGING_STUCK_LOOP_LIMIT = 1000
+
 
 def min_card(hand):
     """
@@ -220,7 +232,7 @@ class CribbageGame:
 
             while True:
                 attempts += 1
-                if attempts > 1000:
+                if attempts > PEGGING_STUCK_LOOP_LIMIT:
                     raise Exception("Max attempts")
                 player = self.squad.getPlayerByNum(currentPlayerNum)
                 if player.canPlay and can_peg(player.pegginghand, total):
